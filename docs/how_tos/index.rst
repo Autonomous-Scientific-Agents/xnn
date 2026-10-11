@@ -16,6 +16,7 @@ details.
    pretrained_models
    train_a_model
    finetune_a_model
+   weight_force_labels
    benchmark_models
    use_upstream_configs
    ase_md

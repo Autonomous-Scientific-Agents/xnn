@@ -49,6 +49,12 @@ the force term averages over atoms.
 - **Per-structure weights.** A ``weight`` in the structure dictionary
   scales that structure's share of every term, for instance to balance a
   sparse set against a dense scan. Uniform weights reproduce the plain loss.
+- **Term and atom weights.** ``energy_weight`` / ``force_weight`` /
+  ``stress_weight`` scale one term of one structure, and
+  ``atom_force_weight`` the force error of each atom, for instance to train
+  on the buried atoms of a cluster only (:ref:`howto-weight-force-labels`).
+  Weight 0 drops the label; structures without an energy are masked the
+  same way.
 - **Huber tails.** ``optim.huber_delta`` (or the per-term
   ``huber_delta_energy`` / ``_forces`` / ``_stress``) replaces the squared
   error by a function that is quadratic up to :math:`\delta` and linear
