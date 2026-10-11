@@ -1,0 +1,10 @@
+name: pm6
+cutoff: 0.1               # neighbor-list radius of the data pipeline; the model forms all atom pairs itself
+parameters: pm6           # parameter set: a published set (pm3, pm6, pm6-org, pm7; values downloaded from MOPAC on first use) or a MOPAC EXTERNAL file
+trainable: []             # parameter groups to refit, e.g. [USS, BETAS, ZS, ALPB, XFAC, FN11, PAR]; "all" for every group; [] = the published method
+unrestricted: false       # spin-unrestricted SCF also for closed shells (open shells are always unrestricted)
+corrections: true         # the method's post-SCF and molecular-mechanics corrections
+response: auto            # exact SCF response in the parameter gradients: auto (training), always, never
+max_iter: 300             # SCF iteration limit
+tol_density: 1.0e-9       # SCF convergence: largest density change
+tol_energy: 1.0e-10       # SCF convergence: energy change (eV)

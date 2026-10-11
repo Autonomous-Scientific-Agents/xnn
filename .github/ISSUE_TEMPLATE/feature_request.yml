@@ -1,0 +1,30 @@
+name: Feature or model request
+description: Propose a new feature, model, dataset or option.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what stops you today. Describe the problem before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How it could work in xnn, with a sketch of the user-facing call if you have one.
+  - type: textarea
+    id: model
+    attributes:
+      label: For a new model
+      description: |
+        The paper; the reference implementation and its license (copyleft implementations
+        cannot be used as a source); the data it was published on; and a published number we can
+        reproduce to check the implementation.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to implement this myself, after we agree on the approach here.

@@ -35,6 +35,15 @@ jobs:
       - name: Install xnn and test dependencies
         run: pip install -e ".[ase,gnn,ffnn,vesin,dev]" "e3nn==0.4.4" pytest-cov
 
+      - name: Fetch the MOPAC parameter files of the sqmnn methods
+        # xnn does not ship the published PM3/PM6/PM6-ORG/PM7 values; they are
+        # downloaded from the pinned MOPAC release (MD5-checked) into the model
+        # cache here, the only network access of the run, so the tests below
+        # can run with XNN_OFFLINE
+        run: >
+          python -c "from xnn.sqmnn.common.published import published_parameters as p;
+          [p(m) for m in ('pm3', 'pm6', 'pm6-org', 'pm7')]"
+
       - name: Run the tests with coverage
         env:
           XNN_OFFLINE: "1"

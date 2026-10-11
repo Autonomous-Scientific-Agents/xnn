@@ -23,6 +23,8 @@ a dataclass holding one structure or a batch:
    graph.charges                                   # (N,) partial-charge targets, optional
    graph.total_charge, graph.spin_multiplicity     # (B,), optional; neutral / closed shell if None
    graph.weight, graph.head                        # (B,) loss weight and readout head, optional
+   graph.energy_weight, graph.force_weight, graph.stress_weight   # (B,) term weights, optional
+   graph.atom_force_weight                         # (N,) per-atom force weight, optional
 
 :meth:`~xnn.common.data.atomic_data.AtomicGraph.edge_vectors` computes
 ``pos[dst] - pos[src] + cell_shift @ cell`` differentiably, which is where
@@ -50,7 +52,11 @@ The input format is a plain dictionary per structure:
        "total_charge": 0.0,       # or "charge"; optional
        "spin_multiplicity": 1,    # optional
        "weight": 1.0,             # per-structure loss weight, optional
+       "energy_weight": 1.0,      # or force_weight / stress_weight: one term only, optional
+       "atom_force_weight": ...,  # (N,) weight of each atom's force error, optional
    }
+
+The weights are explained in :ref:`howto-weight-force-labels`.
 
 Datasets and batching
 =====================
@@ -66,9 +72,9 @@ concatenates graphs into one batched graph, which the trainer uses as its
    ds = AtomicDataset(structures, cutoff=5.0)
    batch = collate([ds[0], ds[1], ds[2]])     # one AtomicGraph holding 3 structures
 
-A batch may mix molecules and cells, and structures with and without force,
-stress, dipole or charge labels: the missing labels are masked out of the loss. Energy
-labels are all or nothing.
+A batch may mix molecules and cells, and structures with and without energy,
+force, stress, dipole or charge labels: the missing labels are masked out of
+the loss.
 
 Files
 =====
@@ -86,7 +92,9 @@ a full matrix:
 Positions need not be wrapped into the cell. The converters
 :func:`~xnn.common.data.ase_io.load_structures` and
 :func:`~xnn.common.data.ase_io.atoms_to_structure` are public as well;
-per-atom ``charges`` are read from ``atoms.arrays["charges"]``.
+per-atom ``charges`` are read from ``atoms.arrays["charges"]``, the loss
+weights ``weight`` / ``energy_weight`` / ``force_weight`` / ``stress_weight``
+from ``atoms.info`` and ``atom_force_weight`` from ``atoms.arrays``.
 
 RuNNer ``input.data`` files (bohr, hartree) read into structure dictionaries
 in Angstrom and eV, with reference charges and the total charge:
@@ -151,11 +159,20 @@ Standard benchmark datasets download, convert and cache in one call:
   ase). Option ``system``: ``carbon_chain``, ``ag_clusters``,
   ``nacl_clusters`` or ``au2_mgo`` (periodic). The molecular sets are
   CC BY-NC 4.0.
+- ``spookynet_states``: the electronic-state sets of the SpookyNet paper,
+  2200 Ag3+ / Ag3- clusters or singlet / triplet CH2 molecules at GFN2-xTB
+  with total charges, spin multiplicities, energies, forces and dipoles.
+  Options ``system`` (``ag3`` or ``carbene``), ``n_train`` / ``n_val``
+  (1000 / 100, the rest is ``test``), ``seed``.
 - ``argon_md``: periodic argon with energies, forces and stress, bundled
   with the repository; used by the argon example notebooks.
 - ``lode_dimers``: the LODE non-bonded sets (biomolecular dimers, monomers,
   point charges, xenon). Options ``subset``, ``label``, ``return_info``; the
   bundled ``bio_scan`` subset loads offline.
+- ``s22`` / ``s66``: the S22 and S66 noncovalent dimers at their reference
+  geometries with per-atom ``fragment`` labels and CCSD(T)/CBS
+  ``interaction_energy`` (kcal/mol). Option ``reference`` (``original`` or,
+  for S22, ``revised``).
 
 Files are cached and MD5-verified under ``datasets/<name>/`` (``cache_dir``,
 ``XNN_DATASETS`` or ``XNN_CACHE`` change that). The ANI sets need the ``hub``

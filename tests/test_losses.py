@@ -233,3 +233,72 @@ def test_charge_term_is_a_weighted_per_atom_mean():
     err = (pred["charges"] - b.charges) ** 2
     assert logs["charge_mse"] == pytest.approx(float((w_atom * err).sum() / w_atom.sum()), rel=1e-12)
     assert float(loss) == pytest.approx(plain["loss"] + 4.0 * logs["charge_mse"], rel=1e-12)
+
+
+def _batch_with(extra):
+    """The two-structure batch with extra keys merged into each structure."""
+    structs = _structs()
+    for s, e in zip(structs, extra):
+        s.update(e)
+    ds = AtomicDataset(structs, 5.0)
+    return collate([ds[0], ds[1]])
+
+
+def test_term_and_atom_weights_plumb_through_graph_and_collate():
+    """Term and atom weights survive to_graph, collate and subset; missing ones are 1."""
+    b = _batch_with([{"force_weight": 2.0, "atom_force_weight": [0.0, 0.5, 1.0]}, {}])
+    assert b.energy_weight is None and b.stress_weight is None
+    assert b.force_weight.tolist() == [2.0, 1.0]
+    assert b.atom_force_weight.tolist() == [0.0, 0.5, 1.0] + [1.0] * 6
+    sub = b.subset(torch.tensor([True, False]))
+    assert sub.force_weight.tolist() == [2.0]
+    assert sub.atom_force_weight.tolist() == [0.0, 0.5, 1.0]
+
+
+def test_unit_term_and_atom_weights_reproduce_the_unweighted_loss():
+    """Weights of 1 everywhere are a no-op."""
+    plain = _batch()
+    ref, _ = weighted_loss(_pred(plain), plain, 1.0, 10.0, 0.0)
+    ones = _batch_with([{"atom_force_weight": np.ones(3), "energy_weight": 1.0, "force_weight": 1.0},
+                        {"atom_force_weight": np.ones(6)}])
+    got, _ = weighted_loss(_pred(ones), ones, 1.0, 10.0, 0.0)
+    torch.testing.assert_close(got, ref, rtol=1e-12, atol=0)
+
+
+def test_atom_force_weights_as_hand_computed():
+    """The force term is sum(u |dF|^2) / (3 sum(u)), u = weight * force_weight * atom weight."""
+    a = [0.0, 0.5, 1.0, 1.0, 0.25, 0.0, 2.0, 1.0, 1.0]
+    b = _batch_with([{"weight": 2.0, "force_weight": 3.0, "atom_force_weight": a[:3]},
+                     {"atom_force_weight": a[3:]}])
+    pred = _pred(b)
+    _, logs = weighted_loss(pred, b, 1.0, 1.0, 0.0)
+    u = torch.tensor([6.0 * x for x in a[:3]] + a[3:])
+    f_err = (pred["forces"] - b.forces) ** 2
+    expect = float((u[:, None] * f_err).sum() / (3 * u.sum()))
+    assert logs["force_mse"] == pytest.approx(expect, rel=1e-12)
+
+
+def test_zero_atom_weights_drop_only_those_force_labels():
+    """Atoms of weight 0 leave the force term; the rest average as if alone."""
+    keep = np.array([1, 0, 1, 1, 1, 0, 1, 1, 1], dtype=float)
+    b = _batch_with([{"atom_force_weight": keep[:3]}, {"atom_force_weight": keep[3:]}])
+    pred = _pred(b)
+    _, logs = weighted_loss(pred, b, 1.0, 1.0, 0.0)
+    m = torch.as_tensor(keep, dtype=torch.bool)
+    expect = float(((pred["forces"][m] - b.forces[m]) ** 2).mean())
+    assert logs["force_mse"] == pytest.approx(expect, rel=1e-12)
+
+
+def test_term_weights_act_on_their_own_term_only():
+    """energy_weight 0 drops a structure's energy, not its forces."""
+    b = _batch_with([{"energy_weight": 0.0}, {}])
+    pred = _pred(b)
+    _, logs = weighted_loss(pred, b, 1.0, 1.0, 0.0)
+    plain = _batch()
+    _, ref = weighted_loss(_pred(plain), plain, 1.0, 1.0, 0.0)
+    e_err = ((pred["energy"][1] - b.energy[1]) / b.n_atoms[1]) ** 2
+    assert logs["energy_mse"] == pytest.approx(float(e_err), rel=1e-12)
+    assert logs["force_mse"] == pytest.approx(ref["force_mse"], rel=1e-12)
+    none = _batch_with([{"energy_weight": 0.0}, {"energy_weight": 0.0}])
+    _, logs = weighted_loss(_pred(none), none, 1.0, 1.0, 0.0)
+    assert "energy_mse" not in logs and "force_mse" in logs

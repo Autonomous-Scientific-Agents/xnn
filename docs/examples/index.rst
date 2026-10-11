@@ -116,6 +116,7 @@ spectra of ethanol from classical and ring-polymer dynamics (Fig. 5).
    Propagation of directional information: the substituted ferrocene rotation <nb/gnn/painn/painn_ferrocene>
    Infrared and Raman spectra of ethanol from classical and ring-polymer dynamics <nb/gnn/painn/painn_spectra>
 
+
 3D steerable CNN (cnn)
 ======================
 
@@ -216,6 +217,25 @@ BAMBOO (hybrid)
    BAMBOO charges, energy decomposition, and deployment <nb/hybrid/bamboo/bamboo_charge_analysis>
    BAMBOO on charged / polar molecular dimers: why the charge-equilibrium term matters <nb/hybrid/bamboo/bamboo_dimer_electrostatics>
 
+SpookyNet (hybrid)
+==================
+
+The SpookyNet paper (Unke *et al.*, Nat. Commun. 2021): the building blocks
+checked with untrained models and the published example model, the
+electronic-state surfaces of Ag3+ / Ag3- and singlet / triplet CH2 (Fig. 4),
+the dissociation of diatomics with and without nonlocal interactions
+(Fig. 5), the 4G-HDNNP charge-transfer benchmarks (Table 1) and MD17
+(Table 3).
+
+.. example-toctree::
+   :caption: SpookyNet (hybrid)
+
+   SpookyNet from the paper: electronic states, orbital-like interactions and nonlocality <nb/hybrid/spookynet/spookynet_paper_checks>
+   Electronic states: Ag3+ / Ag3- and singlet / triplet CH2 <nb/hybrid/spookynet/spookynet_electronic_states>
+   Nonlocal effects: dissociation of diatomic molecules <nb/hybrid/spookynet/spookynet_nonlocal>
+   Nonlocal charge transfer: the 4G-HDNNP benchmarks <nb/hybrid/spookynet/spookynet_charge_transfer>
+   SpookyNet on MD17 <nb/hybrid/spookynet/spookynet_md17>
+
 ReaxFF / ReaxFF-nn (ffnn)
 =========================
 
@@ -253,6 +273,22 @@ refit on benzene and tested for transfer to naphthalene and toluene.
    DREIDING conformational energetics: reproducing Tables XI and XII of the 1990 paper <nb/ffnn/dreiding/dreiding_conformational_energetics>
    Retraining DREIDING: refitting the generators, and testing whether they transfer <nb/ffnn/dreiding/dreiding_refit_aromatics>
 
+Semiempirical methods (sqmnn)
+=============================
+
+The tables of the PM3, PM6, PM7 and PM6-ORG papers reproduced with the published
+parameters: heats of formation, dipoles and ionization potentials, the modified
+core-core terms, and the S22 / S66 interaction energies; then the parameters refit
+by gradient descent and written back for MOPAC.
+
+.. example-toctree::
+   :caption: Semiempirical methods (sqmnn)
+
+   PM3 heats of formation, dipole moments and ionization potentials (Stewart 1989) <nb/sqmnn/pm3/pm3_heats_of_formation>
+   PM6: the modified NDDO approximations of the 2007 paper <nb/sqmnn/pm6/pm6_approximations>
+   Noncovalent interactions: PM7 (S22, S66) and PM6-ORG <nb/sqmnn/pm7/pm7_pm6org_noncovalent>
+   Refitting NDDO parameters: hydrogen bonds, MOPAC export and force training <nb/sqmnn/training/sqmnn_parameter_refit>
+
 Deployment: MDI (common)
 ========================
 
@@ -279,6 +315,7 @@ reference (:ref:`fidelity`), ending with a weight transplant.
    Spherical CNN, block by block: harmonic analysis, correlations, equivariance and the reference implementation <nb/fidelity_checks/s2cnn_verification>
    DimeNet and DimeNet++ against the authors' TensorFlow implementation, including the published QM9 model <nb/fidelity_checks/dimenet_verification>
    PaiNN, block by block: the paper's equations and the reference implementation <nb/fidelity_checks/painn_verification>
+   SpookyNet, block by block: the paper's equations and the reference implementation <nb/fidelity_checks/spookynet_verification>
    HDNNP (2G, 3G, 4G) against the RuNNer code, including a published 4G model <nb/fidelity_checks/hdnnp_verification>
    ANI-1, block by block: reproducing the original implementation with `xnn` <nb/fidelity_checks/ani_verification>
    PhysNet, block by block: reproducing the original implementation with `xnn` <nb/fidelity_checks/physnet_verification>
@@ -294,6 +331,7 @@ reference (:ref:`fidelity`), ending with a weight transplant.
    BAMBOO fidelity check: `xnn` vs the original `bytedance/bamboo`, block by block <nb/fidelity_checks/bamboo_verification>
    OPLS: verifying the `xnn` implementation against OpenMM and the 1996 paper <nb/fidelity_checks/opls_verification>
    DREIDING: verifying the `xnn` implementation against LAMMPS and the 1990 paper <nb/fidelity_checks/dreiding_verification>
+   PM3, PM6, PM6-ORG and PM7 against the MOPAC program <nb/fidelity_checks/sqmnn_verification>
 
 Parity checks
 =============

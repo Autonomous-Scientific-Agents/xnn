@@ -8,7 +8,7 @@ PyTorch interface.
 
 **x** in **xnn** refers to the neural network model architectures: **g** stands
 for graph, **d** for dense, **c** for convolutional, **ff** for classical
-force-fields, **hybrid** for mixed models, all sharing one data object, one
+force-fields, **sqm** for semi-empirical quantum mechanics, **hybrid** for mixed models, all sharing one data object, one
 trainer and one deployment path. This categorization is reflected in the package
 structure.
 
@@ -141,12 +141,13 @@ the MolSSI Driver Interface.
 | Generic add-ons (`common`) | LES long-range electrostatics (optionally charge-constrained or charge-equilibrated); DFT-D3 (zero, BJ, mzero, op damping) and DFT-D4 dispersion |
 | Graph neural networks (`gnn`) | SchNet, DimeNet, DimeNet++, PaiNN, NequIP, MACE, Allegro, CACE, AIMNet2 |
 | Dense neural networks (`dnn`) | ANI (ANI-1, ANI-1x, ANI-1ccx, ANI-2x), PhysNet, HDNNP (generations 1 to 4) |
-| Convolutional neural networks (`cnn`) | 3D steerable CNN (SE(3)-equivariant), conventional 3D CNN, spherical CNN |
+| Convolutional neural networks (`cnn`) | 3D steerable-/ conventional- / spherical-CNN |
 | Force field neural networks (`ffnn`) | ReaxFF / ReaxFF-nn, OPLS-AA / L-OPLS, DREIDING / X6 |
-| Hybrid neural networks (`hybrid`) | BAMBOO |
+| Hybrid neural networks (`hybrid`) | BAMBOO, SpookyNet |
+| Semiempirical quantum chemistry (`sqmnn`) | PM3, PM6, PM6-ORG, PM7 (classics or trainable models) |
 
 Each model is checked against its reference code or paper
-(`examples/fidelity_checks/`). SchNet, DimeNet, PaiNN, NequIP, MACE, Allegro and AIMNet2
+(`examples/fidelity_checks/`). SchNet, DimeNet, PaiNN, SpookyNet, NequIP, MACE, Allegro and AIMNet2
 also export to TorchScript / LAMMPS; every model deploys through ASE and the MDI
 engine.
 
@@ -155,6 +156,12 @@ engine.
 Executed notebooks for every model are under `examples/`
 (`pip install -e ".[examples]"`); `examples/quickstart.py` is a minimal script.
 Run the tests with `pytest tests/`.
+
+## Contributing
+
+Bug reports, fixes and new models are welcome. Read [CONTRIBUTING.md](https://github.com/molssi-ai/xnn/blob/main/CONTRIBUTING.md)
+first: it explains how to report a bug with a reproducible example and what a pull request
+needs to be merged.
 
 ## License
 
@@ -169,7 +176,7 @@ If you use xnn in your work, please cite it as:
   author  = {Mostafanejad, Mohammad},
   title   = {xnn: Machine-learning interatomic potentials for molecules and materials},
   year    = {2026},
-  version = {0.10.0},
+  version = {0.11.0},
   url     = {https://github.com/molssi-ai/xnn}
 }
 ```

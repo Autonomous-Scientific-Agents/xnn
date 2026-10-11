@@ -54,6 +54,15 @@ identical weights involves:
   of its equations and against ``schnetpack`` under transplanted weights:
   energies, forces, latent charges, dipoles and polarizabilities agree to
   float64 and float32 round-off.
+- **SpookyNet** (`OUnke/SpookyNet <https://github.com/OUnke/SpookyNet>`_):
+  a build from the paper, verified against an independent implementation of
+  its equations and against the reference code under transplanted weights:
+  energies, forces, charges and dipoles agree to float64 round-off (about
+  1e-14) for molecules in several charge and spin states, batches and
+  periodic cells, and the published example model reproduces to 1e-15. The
+  D4 term uses the dftd4 data of :mod:`~xnn.common.models.d4`; the reference
+  code ships float32-rounded covalent radii, which moves its dispersion
+  energies by about 1e-8 relative.
 - **SE(3) steerable CNN** (Weiler *et al.* 2018): a clean-room build from
   the paper; the steerable kernel basis is formed from Clebsch-Gordan
   coefficients and checked against a numerical solution of the paper's
@@ -88,6 +97,12 @@ identical weights involves:
 - **DREIDING** (Mayo *et al.* 1990): the LAMMPS DREIDING styles to about
   1e-10 kcal/mol, the paper's parameter tables entry by entry, and its
   Table XI barriers to about 0.01 kcal/mol.
+- **PM3, PM6, PM6-ORG, PM7** (Stewart 1989, 2007, 2013, 2023): MOPAC 23.2.5
+  to about 1e-6 kcal/mol in heats of formation and 1e-7 in charges, open
+  shells and transition metals included, and the PM6 and PM7 S22 interaction
+  energies of the PM7 paper (Table 5). Overlaps keep MOPAC's truncated
+  auxiliary series; its PM6-ORG gradient is not the derivative of its
+  energy, xnn's is.
 
 Fidelity means published results can be reproduced, weights move in either
 direction (:ref:`howto-transplant`), and the implementations serve as

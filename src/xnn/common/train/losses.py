@@ -40,7 +40,8 @@ def _residual_sq(diff: Tensor, delta: float) -> Tensor:
     return torch.where(a <= delta, diff ** 2, 2.0 * delta * a - delta ** 2)
 
 
-def _masked(w: Optional[Tensor], mask: Optional[Tensor], like: Tensor) -> Optional[Tensor]:
+def _masked(w: Optional[Tensor], mask: Optional[Tensor], like: Tensor,
+            term: Optional[Tensor] = None) -> Optional[Tensor]:
     """Per-structure weights restricted to the structures that carry a label.
 
     Parameters
@@ -51,13 +52,19 @@ def _masked(w: Optional[Tensor], mask: Optional[Tensor], like: Tensor) -> Option
         Bool ``(B,)``, the structures with the label; ``None`` means all.
     like : Tensor
         Gives the dtype of the result.
+    term : Tensor or None, optional
+        Per-structure weights ``(B,)`` of this one term (``energy_weight``,
+        ``force_weight`` or ``stress_weight``); ``None`` means 1.
 
     Returns
     -------
     Tensor or None
-        ``w`` with the unlabelled structures at zero, or ``None`` when neither
-        weights nor a mask apply (the plain mean).
+        ``w`` times ``term`` with the unlabelled structures at zero, or
+        ``None`` when no weights and no mask apply (the plain mean).
     """
+    if term is not None:
+        term = term.to(like.dtype)
+        w = term if w is None else w * term
     if mask is None:
         return w
     m = mask.to(like.dtype)
@@ -114,23 +121,33 @@ def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
     loss = pred["energy"].new_zeros(())
 
     if data.energy is not None and energy_weight > 0:
-        # per-atom energy error -> size-extensive, well-scaled across structures
-        n = data.n_atoms.to(pred["energy"].dtype)
-        e_loss = _mean(_residual_sq((pred["energy"] - data.energy) / n, d_e), w)
-        loss = loss + energy_weight * e_loss
-        logs["energy_mse"] = float(e_loss.detach())
+        w_e = _masked(w, getattr(data, "energy_mask", None), pred["energy"],
+                      getattr(data, "energy_weight", None))
+        if w_e is None or bool(w_e.any()):
+            # per-atom energy error -> size-extensive, well-scaled across structures
+            n = data.n_atoms.to(pred["energy"].dtype)
+            e_loss = _mean(_residual_sq((pred["energy"] - data.energy) / n, d_e), w_e)
+            loss = loss + energy_weight * e_loss
+            logs["energy_mse"] = float(e_loss.detach())
 
     if data.forces is not None and force_weight > 0 and "forces" in pred:
-        w_f = _masked(w, getattr(data, "forces_mask", None), pred["forces"])
-        if w_f is None or bool(w_f.any()):
-            # a structure's weight (and label mask) applies to each of its atoms
-            w_atom = None if w_f is None else w_f[data.batch]
+        w_f = _masked(w, getattr(data, "forces_mask", None), pred["forces"],
+                      getattr(data, "force_weight", None))
+        # a structure's weights (and label mask) apply to each of its atoms,
+        # times the atom's own weight
+        w_atom = None if w_f is None else w_f[data.batch]
+        a = getattr(data, "atom_force_weight", None)
+        if a is not None:
+            a = a.to(pred["forces"].dtype)
+            w_atom = a if w_atom is None else w_atom * a
+        if w_atom is None or bool(w_atom.any()):
             f_loss = _mean(_residual_sq(pred["forces"] - data.forces, d_f), w_atom)
             loss = loss + force_weight * f_loss
             logs["force_mse"] = float(f_loss.detach())
 
     if data.stress is not None and stress_weight > 0 and "stress" in pred:
-        w_s = _masked(w, getattr(data, "stress_mask", None), pred["stress"])
+        w_s = _masked(w, getattr(data, "stress_mask", None), pred["stress"],
+                      getattr(data, "stress_weight", None))
         if w_s is None or bool(w_s.any()):
             s_loss = _mean(_residual_sq(pred["stress"] - data.stress, d_s), w_s)
             loss = loss + stress_weight * s_loss
@@ -209,8 +226,19 @@ def weighted_loss(pred: dict[str, Tensor], data: AtomicGraph,
     sampling, silently allocates the fit. Set ``weight`` in the structure dicts
     (see :func:`~xnn.common.data.dataset.to_graph`) to allocate it on purpose.
 
+    **Term and atom weights.** ``data.energy_weight`` / ``force_weight`` /
+    ``stress_weight`` (shape ``(B,)``) multiply ``weight`` for one term only,
+    and ``data.atom_force_weight`` (shape ``(N,)``) multiplies the weight of
+    each atom's force error. The force term is then
+    ``sum_i u_i |dF_i|^2 / (3 sum_i u_i)`` with
+    ``u_i = weight * force_weight * atom_force_weight``, so a weighted atom
+    counts like an atom of an unweighted structure. An atom of weight 0 stays
+    in the graph as environment; only its force label is dropped. A term
+    whose weights are all zero in a batch is skipped.
+
     **Partially labelled batches.** A batch may mix structures with and without
-    force or stress labels (``data.forces_mask`` / ``data.stress_mask``, set by
+    energy, force or stress labels (``data.energy_mask`` /
+    ``data.forces_mask`` / ``data.stress_mask``, set by
     :func:`~xnn.common.data.dataset.collate`): those terms then average over
     the labelled structures only, and a batch without any is skipped for that
     term.

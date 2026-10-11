@@ -145,3 +145,18 @@ def test_info_and_arrays_fallback():
     assert s["forces"].shape == (4, 3)
     assert s["stress"].shape == (3, 3)
     assert np.allclose(s["stress"], voigt_6_to_full_3x3_stress(atoms.info["stress"]))
+
+
+def test_loss_weights_from_extxyz(tmp_path):
+    """Structure weights come from info, per-atom force weights from a column."""
+    atoms = _argon_frame(0)
+    atoms.info.update(weight=2.0, energy_weight=0.0, force_weight=0.5, stress_weight=0.0)
+    atoms.arrays["atom_force_weight"] = np.linspace(0.0, 1.0, len(atoms))
+    path = tmp_path / "weights.extxyz"
+    write(path, [atoms, _argon_frame(1)])
+    s, plain = load_structures(str(path))
+    assert [s[k] for k in ("weight", "energy_weight", "force_weight", "stress_weight")] == [2.0, 0.0, 0.5, 0.0]
+    assert np.allclose(s["atom_force_weight"], np.linspace(0.0, 1.0, len(atoms)))
+    assert "atom_force_weight" not in plain and "weight" not in plain
+    g = AtomicDataset.from_file(str(path), cutoff=4.0)[0]
+    assert g.atom_force_weight.shape == (len(atoms),) and float(g.energy_weight) == 0.0

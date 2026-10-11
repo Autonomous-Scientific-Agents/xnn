@@ -1,0 +1,79 @@
+name: Bug report
+description: Something fails, crashes or gives a wrong result.
+labels: ["bug", "needs-reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. We work on a bug once we can run your example and see the
+        failure (see CONTRIBUTING.md, "Reporting a bug"). Issues without a runnable example are
+        closed after 14 days and can be reopened when one is added.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happens
+      description: One or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproducible example
+      description: |
+        A short script that runs on its own and shows the failure: structures built in code (or a
+        public dataset through `load_dataset`), a seeded random or public pretrained model, the
+        fewest atoms and steps that still fail. No files from your machine.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+      description: What you expected, and what you got. Give numbers where there are numbers.
+    validations:
+      required: true
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Full traceback or output
+      description: As text, not a screenshot.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        The output of:
+        ```
+        python -c "import sys, platform, torch, xnn; print('xnn', xnn.__version__, xnn.__file__); print('python', sys.version.split()[0], platform.platform()); print('torch', torch.__version__, 'cuda', torch.version.cuda, 'gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+        pip list 2>/dev/null | grep -i -E "e3nn|ase|vesin|cuequivariance|mace|nequip|numpy|pymdi"
+        ```
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Where does it fail?
+      multiple: true
+      options:
+        - CPU
+        - GPU
+        - float32
+        - float64
+        - TorchScript / LAMMPS export
+        - ASE calculator
+        - MDI engine
+        - distributed training (torchrun)
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the open and closed issues.
+          required: true
+        - label: The example runs on its own in a fresh environment and shows the failure.
+          required: true
+        - label: It fails with the latest release or with the `dev` branch.
+          required: true

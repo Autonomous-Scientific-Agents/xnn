@@ -11,9 +11,9 @@ molecular and periodic systems.
 
 The *x* in **xnn** stands for the architecture family: graph neural networks
 (``gnn``), dense neural networks (``dnn``), convolutional neural networks on
-voxel grids (``cnn``), classical force field neural networks (``ffnn``) and
-hybrid models (``hybrid``). Every model is implemented using the same PyTorch
-``nn.Module`` interface. Thus, one data object, one trainer and one deployment
+voxel grids (``cnn``), classical force field neural networks (``ffnn``),
+semiempirical quantum chemistry (``sqmnn``) and hybrid models (``hybrid``).
+Every model is implemented using the same PyTorch ``nn.Module`` interface. Thus, one data object, one trainer and one deployment
 path serve all model families.
 
 xnn offers several benefits out-of-the-box:
@@ -139,14 +139,16 @@ Models at a glance
      - SE(3) steerable CNN, 3D CNN, spherical CNN
    * - Classical force fields (``ffnn``)
      - ReaxFF / ReaxFF-nn, OPLS-AA / L-OPLS, DREIDING / X6
+   * - Semiempirical quantum chemistry (``sqmnn``)
+     - PM3, PM6, PM6-ORG, PM7
    * - Hybrid neural networks (``hybrid``)
-     - BAMBOO
+     - BAMBOO, SpookyNet
    * - Add-ons for any model (``common``)
      - LES long-range electrostatics, DFT-D3 and DFT-D4 dispersion
 
 Each model matches its reference code or paper to round-off
 (:ref:`fidelity`); the MACE and AIMNet2 foundation models load through the
-hub. Every model trains, evaluates and runs under ASE. SchNet, DimeNet, PaiNN,
+hub. Every model trains, evaluates and runs under ASE. SchNet, DimeNet, PaiNN, SpookyNet,
 NequIP, MACE, Allegro and AIMNet2 also export to TorchScript for LAMMPS, and any
 checkpoint serves as an MDI engine (:ref:`deployment`).
 

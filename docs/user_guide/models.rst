@@ -14,7 +14,7 @@ directly with the same keys:
 
    from xnn.common.models import available_models, build_model, ForceStressOutput
 
-   available_models()          # ['aimnet2', 'allegro', 'ani', 'bamboo', 'cace', 'cnn3d', 'dimenet', 'dimenet++', 'hdnnp', 'mace', 'nequip', 'nnp1g', 'painn', 'physnet', 'reaxff', 'schnet', 'se3cnn', ...]
+   available_models()          # ['aimnet2', 'allegro', 'ani', 'bamboo', 'cace', 'cnn3d', 'dimenet', 'dimenet++', 'hdnnp', 'mace', 'nequip', 'nnp1g', 'painn', 'physnet', 'reaxff', 'schnet', 'se3cnn', 'spookynet', ...]
    model = build_model(cfg.model)   # dispatches to <Model>.from_config(cfg.model)
 
    model = ForceStressOutput(build_model(cfg.model), compute_stress=True)
@@ -373,6 +373,36 @@ kcal/mol and Å; returns ``charges``, ``dipole``, ``energy_nn`` and
      use_electrostatics: true
      use_dispersion: false       # optional D3(CSO)
 
+SpookyNet
+=========
+:class:`~xnn.hybrid.models.spookynet.SpookyNet`: message passing with
+electronic degrees of freedom and nonlocal effects (Unke *et al.* 2021).
+The total charge and the spin enter as embeddings, local interactions use
+s-, p- and d-orbital-like basis functions, and self-attention over all atoms
+of a structure carries nonlocal effects. A ZBL-like repulsion, damped
+electrostatics of the predicted charges and D4 dispersion are added to the
+energy. Returns ``charges`` and ``dipole`` as well. No e3nn. Matches the
+reference implementation (`OUnke/SpookyNet <https://github.com/OUnke/SpookyNet>`_),
+whose saved models load with ``SpookyNet.from_reference_checkpoint(path)``.
+
+.. code-block:: yaml
+
+   model:
+     name: spookynet
+     cutoff: 5.29                # 10 bohr
+     n_features: 128
+     n_interactions: 6
+     n_rbf: 16                   # exponential Bernstein polynomials
+     extra:
+       lr_cutoff: 10.0           # long-range cutoff; needed for periodic cells
+       electrostatics: false     # without dipole or charge labels
+       d4_dispersion: false
+
+The net charge and spin multiplicity come from the structure
+(``total_charge``, ``spin_multiplicity``). Also ``charge_embedding`` /
+``spin_embedding``, ``nonlocal_interactions``, ``attention`` (``favor`` /
+``exact``), ``zbl_repulsion``, ``ewald``, ``exp_weighting``, ``n_residual``.
+
 ReaxFF / ReaxFF-nn
 ==================
 :class:`~xnn.ffnn.models.reaxff.ReaxFF`: the bond-order reactive force
@@ -426,6 +456,32 @@ is trainable. ``from_atoms`` perceives bonds and bond orders.
 Also ``bond_style`` (harmonic / morse), ``angle_style``, ``hbond``,
 ``switch_width``. Set resonance types such as an amide ``C_R``-``N_R``
 explicitly; automatic perception does not.
+
+Semiempirical methods: PM3, PM6, PM6-ORG, PM7
+=============================================
+:class:`~xnn.sqmnn.models.PM6` and its siblings (``sqmnn`` family) are the
+NDDO semiempirical Hartree-Fock methods of Stewart: a minimal ``spd``
+valence basis, multipole two-center integrals, a self-consistent field per
+molecule and the method's core-core repulsion and corrections (PM7 dispersion
+and hydrogen bonds, PM6-ORG D3H4). ``energy`` is the heat of formation in eV;
+the outputs also hold ``heat_of_formation`` (kcal/mol), ``charges`` and
+``dipole``. With the published parameters (the default) the methods
+reproduce MOPAC; ``trainable`` makes parameter groups refittable, with
+exact gradients through the SCF.
+
+.. code-block:: python
+
+   from xnn.sqmnn.models import PM6, PM7
+
+   model = PM7()                                     # published parameters
+   model = PM6(trainable=["BETAS", "BETAP", "ALPB"])  # refit by gradient descent
+   model.parameter_set()                             # write_parameters() -> MOPAC EXTERNAL file
+
+Also ``parameters`` (a set name or a MOPAC ``EXTERNAL`` file), ``corrections``,
+``unrestricted``, ``tol_density``. Molecules only (no periodic cells); open
+shells are spin-unrestricted. The published values are not shipped with xnn:
+the first use of a method downloads them from the MOPAC 23.2.5 sources into
+the model cache.
 
 Add-ons for any model
 =====================
