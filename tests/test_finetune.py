@@ -433,6 +433,22 @@ def test_reference_energies_get_set_and_estimate(name):
         assert abs(est[z] - avg[z]) < 1e-6
 
 
+def test_average_reference_energies_skip_unweighted_energies():
+    """Energies that are missing or weighted to zero stay out of the E0 fit."""
+    avg = {1: -13.6, 6: -1030.0, 8: -2040.0}
+    structs = _structs(8, seed=7, n_atoms=(4, 5, 6, 7))
+    for s in structs:
+        s["energy"] = sum(avg[int(z)] for z in s["atomic_numbers"])
+    structs += [{**structs[0], "energy": 1e3, "energy_weight": 0.0},
+                {**structs[1], "energy": -1e3, "weight": 0.0},
+                {**structs[2], "energy": None}]
+    est = average_atomic_energies(structs)
+    for z in SPECIES:
+        assert abs(est[z] - avg[z]) < 1e-6
+    with pytest.raises(ValueError):
+        average_atomic_energies(structs[-3:])
+
+
 def test_multihead_reference_energies_per_head():
     model = build_model(_model_cfg("schnet").model)
     multi = MultiHead(model, ["pt_head", "Default"])

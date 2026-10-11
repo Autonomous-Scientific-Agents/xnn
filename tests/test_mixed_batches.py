@@ -184,3 +184,32 @@ def test_mixed_batch_built_on_the_gpu():
             assert torch.allclose(out["stress"][b], one["stress"][0], rtol=0, atol=1e-10)
         else:
             assert torch.equal(out["stress"][b].cpu(), torch.zeros(3, 3))
+
+
+def test_mixed_energy_labels_get_a_mask():
+    model = _model({})
+    specs = [_structure(6, 0, False, labels=("forces",)), _structure(8, 1, True)]
+    graphs = [structure_to_graph(s, 4.0) for s in specs]
+    batch = collate(graphs)
+    assert batch.energy_mask.tolist() == [False, True]
+    assert float(batch.energy[0]) == 0.0
+    _, logs = weighted_loss(model(batch), batch, 1.0, 1.0, 0.0)
+    alone = collate(graphs[1:])
+    _, only = weighted_loss(model(alone), alone, 1.0, 1.0, 0.0)
+    assert logs["energy_mse"] == pytest.approx(only["energy_mse"], rel=1e-10)
+    assert batch.subset(torch.tensor([False, True])).energy_mask.tolist() == [True]
+    pairs = collect_predictions(model, [batch], "cpu", ["energy"])
+    assert pairs["energy"][0].numel() == 1
+
+
+def test_metrics_skip_zero_weight_labels():
+    model = _model({})
+    a = np.ones(8)
+    a[:3] = 0.0
+    specs = [{**_structure(8, 1, True), "atom_force_weight": a, "energy_weight": 0.0},
+             {**_structure(6, 0, False), "force_weight": 0.0}]
+    batch = collate([structure_to_graph(s, 4.0) for s in specs])
+    pairs = collect_predictions(model, [batch], "cpu", ["energy", "forces", "stress"])
+    assert pairs["energy"][0].numel() == 1
+    assert pairs["forces"][0].numel() == 5 * 3
+    assert pairs["stress"][0].numel() == 9
