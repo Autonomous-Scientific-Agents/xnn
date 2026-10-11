@@ -41,9 +41,12 @@ def structure_to_graph(
         LES charge solve), ``spin_multiplicity``
         (scalar ``2S + 1``; ``multiplicity`` is a synonym), ``weight`` (scalar
         per-structure loss weight; see
-        :func:`~xnn.common.train.losses.weighted_loss`) and ``head`` (integer
+        :func:`~xnn.common.train.losses.weighted_loss`), ``head`` (integer
         index of the readout head, for multi-head models; see
-        :func:`~xnn.common.finetune.label_head`).
+        :func:`~xnn.common.finetune.label_head`), the per-structure term
+        weights ``energy_weight`` / ``force_weight`` / ``stress_weight``
+        (scalars) and ``atom_force_weight`` ``(N,)`` (the weight of every
+        atom's force error).
     cutoff : float
         Neighbor cutoff radius passed to the neighbor list builder.
     device : torch.device, optional
@@ -115,7 +118,39 @@ def structure_to_graph(
         weight=(t([s["weight"]]).reshape(1) if s.get("weight") is not None else None),
         head=(t([int(s["head"])], dtype=torch.long).reshape(1)
               if s.get("head") is not None else None),
+        energy_weight=(t([s["energy_weight"]]).reshape(1)
+                       if s.get("energy_weight") is not None else None),
+        force_weight=(t([s["force_weight"]]).reshape(1)
+                      if s.get("force_weight") is not None else None),
+        stress_weight=(t([s["stress_weight"]]).reshape(1)
+                       if s.get("stress_weight") is not None else None),
+        atom_force_weight=(t(s["atom_force_weight"]).reshape(n)
+                           if s.get("atom_force_weight") is not None else None),
     )
+
+
+def energy_labelled(structures) -> list[dict]:
+    """The structure dicts whose energy enters the loss.
+
+    A structure is kept when it has an ``energy`` and neither its ``weight``
+    nor its ``energy_weight`` is zero. Reference-energy (E0) fits use this, so
+    energies excluded from the loss do not shift the references either.
+
+    Parameters
+    ----------
+    structures : iterable of dict
+        Structure dicts.
+
+    Returns
+    -------
+    list of dict
+        The energy-labelled structures, in their original order.
+    """
+    def nonzero(s: dict, key: str) -> bool:
+        return s.get(key) is None or float(s[key]) != 0
+
+    return [s for s in structures if s.get("energy") is not None
+            and nonzero(s, "weight") and nonzero(s, "energy_weight")]
 
 
 class AtomicDataset(Dataset):
@@ -249,16 +284,15 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
       keeps ``cell`` / ``pbc`` and a molecular structure gets a zero cell and no
       periodic flag (its edges carry no image shift, so every edge keeps its
       length, and its stress is zero);
-    * structures with and without force, stress, dipole, polarizability or
-      partial-charge labels: the missing ones are zeros, and ``forces_mask`` /
-      ``stress_mask`` / ``dipole_mask`` / ``polarizability_mask`` /
-      ``charges_mask`` (per structure) mark the labelled ones for the loss and
-      the metrics;
+    * structures with and without energy, force, stress, dipole,
+      polarizability or partial-charge labels: the missing ones are zeros,
+      and ``energy_mask`` / ``forces_mask`` / ``stress_mask`` /
+      ``dipole_mask`` / ``polarizability_mask`` / ``charges_mask`` (per
+      structure) mark the labelled ones for the loss and the metrics;
     * structures with and without ``total_charge`` (missing = neutral),
-      ``spin_multiplicity`` (missing = 1), ``weight`` (missing = 1) or
-      ``head`` (missing = 0, the first head).
-
-    ``energy`` is kept only when every structure has one.
+      ``spin_multiplicity`` (missing = 1), ``weight``, ``energy_weight``,
+      ``force_weight``, ``stress_weight``, ``atom_force_weight`` (missing =
+      1) or ``head`` (missing = 0, the first head).
 
     Parameters
     ----------
@@ -279,11 +313,13 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
     atom_charges, ac_masks = [], []
     heads = []
     frag_charges, fc_masks = [], []
-    f_masks, s_masks = [], []
+    e_masks, f_masks, s_masks = [], [], []
+    term_weights = {k: [] for k in ("energy_weight", "force_weight", "stress_weight")}
+    atom_force_weights = []
 
     dtype, device = graphs[0].pos.dtype, graphs[0].pos.device
     has_cell = any(g.cell is not None for g in graphs)
-    has_e = all(g.energy is not None for g in graphs)
+    has_e = any(g.energy is not None for g in graphs)
     has_f = any(g.forces is not None for g in graphs)
     has_s = any(g.stress is not None for g in graphs)
     has_d = any(g.dipole is not None for g in graphs)
@@ -294,6 +330,8 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
     has_m = any(g.spin_multiplicity is not None for g in graphs)
     has_w = any(g.weight is not None for g in graphs)
     has_h = any(g.head is not None for g in graphs)
+    has_tw = {k: any(getattr(g, k) is not None for g in graphs) for k in term_weights}
+    has_aw = any(g.atom_force_weight is not None for g in graphs)
 
     def label_mask(g: AtomicGraph, value, mask) -> Tensor:
         if mask is not None:
@@ -322,7 +360,9 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
                 cells.append(torch.zeros((b, 3, 3), dtype=dtype, device=device))
                 pbcs.append(torch.zeros((b, 3), dtype=torch.bool, device=device))
         if has_e:
-            energies.append(g.energy)
+            energies.append(g.energy if g.energy is not None
+                            else torch.zeros(b, dtype=dtype, device=device))
+            e_masks.append(label_mask(g, g.energy, g.energy_mask))
         if has_f:
             forces.append(g.forces if g.forces is not None else torch.zeros_like(g.pos))
             f_masks.append(label_mask(g, g.forces, g.forces_mask))
@@ -358,7 +398,16 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
         if has_h:
             heads.append(g.head if g.head is not None
                          else torch.zeros(b, dtype=torch.long, device=device))
+        for k, values in term_weights.items():
+            if has_tw[k]:
+                v = getattr(g, k)
+                values.append(v if v is not None else torch.ones(b, dtype=dtype, device=device))
+        if has_aw:
+            atom_force_weights.append(
+                g.atom_force_weight if g.atom_force_weight is not None
+                else torch.ones(g.pos.shape[0], dtype=dtype, device=device))
 
+    e_mask = torch.cat(e_masks, 0) if has_e else None
     f_mask = torch.cat(f_masks, 0) if has_f else None
     s_mask = torch.cat(s_masks, 0) if has_s else None
     d_mask = torch.cat(d_masks, 0) if has_d else None
@@ -378,6 +427,7 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
         forces=torch.cat(forces, 0) if has_f else None,
         stress=torch.cat(stresses, 0) if has_s else None,
         # a mask only where the batch mixes labelled and unlabelled structures
+        energy_mask=None if e_mask is None or bool(e_mask.all()) else e_mask,
         forces_mask=None if f_mask is None or bool(f_mask.all()) else f_mask,
         stress_mask=None if s_mask is None or bool(s_mask.all()) else s_mask,
         dipole=torch.cat(dipoles, 0) if has_d else None,
@@ -392,4 +442,8 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
         spin_multiplicity=torch.cat(mults, 0) if has_m else None,
         weight=torch.cat(weights, 0) if has_w else None,
         head=torch.cat(heads, 0) if has_h else None,
+        energy_weight=torch.cat(term_weights["energy_weight"], 0) if has_tw["energy_weight"] else None,
+        force_weight=torch.cat(term_weights["force_weight"], 0) if has_tw["force_weight"] else None,
+        stress_weight=torch.cat(term_weights["stress_weight"], 0) if has_tw["stress_weight"] else None,
+        atom_force_weight=torch.cat(atom_force_weights, 0) if has_aw else None,
     )

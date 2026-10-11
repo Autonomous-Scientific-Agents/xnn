@@ -31,6 +31,7 @@ from torch import Tensor
 from torch.utils.data import Subset
 
 from ..config.coerce import coerce_per_species, coerce_species, _symbol_to_z
+from ..data import energy_labelled
 
 # One more than the largest supported atomic number, so a lookup tensor of this
 # length can be indexed directly by ``Z`` (index 0 unused, matching CHEMICAL_SYMBOLS).
@@ -88,8 +89,8 @@ def fit_atomic_energies(structures: Sequence[dict]) -> tuple[list[int], list[flo
 
     Solves ``C @ E0 ~= E_total`` where ``C[i, j]`` is the count of species ``j``
     in structure ``i`` -- the standard way to estimate E0s when they are not
-    supplied (MACE's ``average`` scheme). Structures without an energy are
-    skipped.
+    supplied (MACE's ``average`` scheme). Structures without an energy, or
+    with a zero ``weight`` or ``energy_weight``, are skipped.
 
     Parameters
     ----------
@@ -106,7 +107,7 @@ def fit_atomic_energies(structures: Sequence[dict]) -> tuple[list[int], list[flo
     ValueError
         If no structure carries an energy.
     """
-    rows = [s for s in structures if s.get("energy") is not None]
+    rows = energy_labelled(structures)
     if not rows:
         raise ValueError(
             "atomic_energies='average' needs structures with reference "

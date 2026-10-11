@@ -64,6 +64,15 @@ def _energies(structures) -> Tensor:
     return torch.tensor([float(s["energy"]) for s in structures], dtype=torch.float64)
 
 
+def _labelled(structures) -> list:
+    """The energy-labelled structures (:func:`~xnn.common.data.energy_labelled`)."""
+    from ..data import energy_labelled
+    rows = energy_labelled(getattr(structures, "structures", structures))
+    if not rows:
+        raise ValueError("no structure carries an energy label with a nonzero weight")
+    return rows
+
+
 def average_atomic_energies(structures, species: Optional[Sequence[int]] = None) -> dict[int, float]:
     """Per-element reference energies fitted to the energies of ``structures``.
 
@@ -83,6 +92,7 @@ def average_atomic_energies(structures, species: Optional[Sequence[int]] = None)
     dict of int to float
         ``{Z: E0}``.
     """
+    structures = _labelled(structures)
     species = list(species) if species is not None else species_of(structures)
     e0 = _min_norm_lstsq(composition_matrix(structures, species), _energies(structures))
     return {int(z): float(v) for z, v in zip(species, e0)}
@@ -163,6 +173,7 @@ def estimate_atomic_energies(model: nn.Module, structures, species: Optional[Seq
     dict of int to float
         ``{Z: E0}``, the new reference energies.
     """
+    structures = _labelled(structures)
     species = list(species) if species is not None else species_of(structures)
     residual = _energies(structures) - predict_energies(model, structures, batch_size, device)
     delta = _min_norm_lstsq(composition_matrix(structures, species), residual)

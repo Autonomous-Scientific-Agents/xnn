@@ -77,8 +77,8 @@ class AtomicGraph:
         Which structures carry force labels, bool ``(B,)``: set when a batch
         mixes structures with and without them (the missing ones are zeros
         in ``forces`` and excluded from the loss). ``None`` means all do.
-    stress_mask : Tensor, optional
-        The same for ``stress``.
+    energy_mask, stress_mask : Tensor, optional
+        The same for ``energy`` and ``stress``.
     dipole : Tensor, optional
         Target dipole moment per structure, of shape ``(B, 3)`` (e Angstrom
         in the xnn units). Present during training of the models with a
@@ -118,6 +118,13 @@ class AtomicGraph:
         ``(B,)``. ``None`` means the first head. Read by
         :class:`~xnn.common.finetune.MultiHead` (multi-head fine-tuning) and
         by the loss, which weights every head's terms separately.
+    energy_weight, force_weight, stress_weight : Tensor, optional
+        Per-structure weight of one loss term, of shape ``(B,)``, on top of
+        ``weight``; 0 drops that label of the structure. ``None`` means 1.
+    atom_force_weight : Tensor, optional
+        Weight of every atom's force error, of shape ``(N,)``, on top of the
+        structure's weights; 0 keeps the atom as environment but drops its
+        force label. ``None`` means 1.
 
     Attributes
     ----------
@@ -143,8 +150,8 @@ class AtomicGraph:
         Target forces ``(N, 3)``.
     stress : Tensor or None
         Target stress ``(B, 3, 3)``.
-    forces_mask, stress_mask : Tensor or None
-        Bool ``(B,)``: the structures that carry force / stress labels.
+    energy_mask, forces_mask, stress_mask : Tensor or None
+        Bool ``(B,)``: the structures that carry energy / force / stress labels.
     dipole : Tensor or None
         Target dipole moment ``(B, 3)``.
     polarizability : Tensor or None
@@ -163,6 +170,10 @@ class AtomicGraph:
         Per-structure loss weight ``(B,)``.
     head : Tensor or None
         Readout head per structure ``(B,)``.
+    energy_weight, force_weight, stress_weight : Tensor or None
+        Per-structure term weights ``(B,)``.
+    atom_force_weight : Tensor or None
+        Per-atom force weight ``(N,)``.
     """
 
     # structure
@@ -179,8 +190,9 @@ class AtomicGraph:
     energy: Optional[Tensor] = None   # (B,)
     forces: Optional[Tensor] = None   # (N, 3)
     stress: Optional[Tensor] = None   # (B, 3, 3)
-    # which structures carry forces / stress when a batch mixes labelled and
-    # unlabelled ones; None = all of them
+    # which structures carry energy / forces / stress when a batch mixes
+    # labelled and unlabelled ones; None = all of them
+    energy_mask: Optional[Tensor] = None   # (B,) bool
     forces_mask: Optional[Tensor] = None   # (B,) bool
     stress_mask: Optional[Tensor] = None   # (B,) bool
     # tensorial labels of molecules: the dipole moment (e A) and the
@@ -200,6 +212,11 @@ class AtomicGraph:
     spin_multiplicity: Optional[Tensor] = None   # (B,) 2S+1; None = closed shell
     weight: Optional[Tensor] = None         # (B,) loss weight; None = all equal
     head: Optional[Tensor] = None           # (B,) readout head; None = the first
+    # per-structure term weights and per-atom force weights; None = 1
+    energy_weight: Optional[Tensor] = None       # (B,)
+    force_weight: Optional[Tensor] = None        # (B,)
+    stress_weight: Optional[Tensor] = None       # (B,)
+    atom_force_weight: Optional[Tensor] = None   # (N,)
     # dtype the model computes in, when the geometry is kept in a wider one
     # (float64 positions for a float32 model); None = the positions' dtype
     compute_dtype: Optional[torch.dtype] = None
@@ -284,6 +301,7 @@ class AtomicGraph:
             energy=rows(self.energy, keep),
             forces=rows(self.forces, node_keep),
             stress=rows(self.stress, keep),
+            energy_mask=rows(self.energy_mask, keep),
             forces_mask=rows(self.forces_mask, keep),
             stress_mask=rows(self.stress_mask, keep),
             dipole=rows(self.dipole, keep),
@@ -298,6 +316,10 @@ class AtomicGraph:
             spin_multiplicity=rows(self.spin_multiplicity, keep),
             weight=rows(self.weight, keep),
             head=rows(self.head, keep),
+            energy_weight=rows(self.energy_weight, keep),
+            force_weight=rows(self.force_weight, keep),
+            stress_weight=rows(self.stress_weight, keep),
+            atom_force_weight=rows(self.atom_force_weight, node_keep),
             compute_dtype=self.compute_dtype,
         )
 
