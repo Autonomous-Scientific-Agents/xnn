@@ -15,21 +15,20 @@ and the dipole moment about the origin (e Angstrom).
 
 Notes
 -----
-* Data: Zenodo record 10.5281/zenodo.5115732 (CC BY 4.0), SQLite files read
-  with the standard library.
+* Data: Zenodo record 10.5281/zenodo.5115732 (CC BY 4.0), SQLite files.
 * The paper trained on 1000 random structures; the builder draws the
   splits from a seeded permutation (1000 / 100 / 1100 by default), which is
   reproducible but not the authors' own.
 """
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
 
 from ._download import download_file
+from ._sqlite import read_table
 from .base import DatasetBuilder, register_dataset
 
 _URL = "https://zenodo.org/records/5115732/files/{name}?download=1"
@@ -41,9 +40,10 @@ _ALIASES = {"ag": "ag3", "ag3+/ag3-": "ag3", "ch2": "carbene"}
 def _read(path: Path) -> list[dict]:
     """Structure dicts of one SQLite file, in file order."""
     structures = []
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
-        rows = db.execute("SELECT Q, S, Z, R, E, F, D FROM data ORDER BY id").fetchall()
-    for q, s, z, r, e, f, d in rows:
+    names, rows = read_table(path, "data")                 # in id (rowid) order
+    col = [names.index(c) for c in ("Q", "S", "Z", "R", "E", "F", "D")]
+    for row in rows:
+        q, s, z, r, e, f, d = (row[k] for k in col)
         numbers = np.frombuffer(z, dtype="<i4").astype(np.int64)
         n = numbers.shape[0]
         structures.append({

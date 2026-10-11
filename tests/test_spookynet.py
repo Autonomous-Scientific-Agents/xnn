@@ -702,7 +702,7 @@ def test_paper_config_file():
 
 def test_states_dataset_reader(tmp_path):
     """The spookynet_states hub reads charge, spin, energy, forces and dipole rows."""
-    import sqlite3
+    sqlite3 = pytest.importorskip("sqlite3")   # only to write the test file
     from xnn.common.data import load_dataset
     from xnn.common.data.hub.spookynet_states import _read
 
