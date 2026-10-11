@@ -144,7 +144,7 @@ the MolSSI Driver Interface.
 | Convolutional neural networks (`cnn`) | 3D steerable-/ conventional- / spherical-CNN |
 | Force field neural networks (`ffnn`) | ReaxFF / ReaxFF-nn, OPLS-AA / L-OPLS, DREIDING / X6 |
 | Hybrid neural networks (`hybrid`) | BAMBOO, SpookyNet |
-| Semiempirical quantum chemistry (`sqmnn`) | PM3, PM6, PM6-ORG, PM7 (classics or trainable models) |
+| Semiempirical quantum mechanics neural networks (`sqmnn`) | PM3, PM6, PM6-ORG, PM7 (classics or trainable) |
 
 Each model is checked against its reference code or paper
 (`examples/fidelity_checks/`). SchNet, DimeNet, PaiNN, SpookyNet, NequIP, MACE, Allegro and AIMNet2
