@@ -1,0 +1,48 @@
+name: Numerical discrepancy
+description: An xnn model disagrees with its reference implementation or paper.
+labels: ["fidelity", "needs-reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Faithful models reproduce their reference code under transplanted weights; clean-room
+        models reproduce their paper's equations and published numbers (see CONTRIBUTING.md,
+        "Reporting a numerical discrepancy"). Differences at float32 round-off (about 1e-6
+        relative) are expected in float32; please compare in float64 where you can.
+  - type: input
+    id: model
+    attributes:
+      label: Model or component
+      placeholder: e.g. mace, nequip, d4, les, reaxff
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference
+      description: The upstream package and its exact version, or the paper and the equation, table or figure.
+    validations:
+      required: true
+  - type: textarea
+    id: script
+    attributes:
+      label: Comparison script
+      description: Computes the same quantity with xnn and the reference, on the same structure and the same weights. Self-contained, no local files.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Both results
+      description: The two numbers, their difference, the precision (float32 or float64) and the device.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: The environment command from the bug report form, plus the reference package's version.
+      render: text
+    validations:
+      required: true

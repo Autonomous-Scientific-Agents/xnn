@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question about using xnn
+    url: https://github.com/molssi-ai/xnn/discussions
+    about: Ask usage questions in Discussions; issues are for bugs and requests.
+  - name: Documentation
+    url: https://molssi-ai.github.io/xnn/
+    about: Installation, tutorials, how-to guides and the API reference.
+  - name: Security vulnerability
+    url: https://github.com/molssi-ai/xnn/security/advisories/new
+    about: Report security problems privately, not in a public issue.

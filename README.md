@@ -157,6 +157,12 @@ Executed notebooks for every model are under `examples/`
 (`pip install -e ".[examples]"`); `examples/quickstart.py` is a minimal script.
 Run the tests with `pytest tests/`.
 
+## Contributing
+
+Bug reports, fixes and new models are welcome. Read [CONTRIBUTING.md](https://github.com/molssi-ai/xnn/blob/main/CONTRIBUTING.md)
+first: it explains how to report a bug with a reproducible example and what a pull request
+needs to be merged.
+
 ## License
 
 MIT
