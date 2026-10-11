@@ -273,6 +273,22 @@ refit on benzene and tested for transfer to naphthalene and toluene.
    DREIDING conformational energetics: reproducing Tables XI and XII of the 1990 paper <nb/ffnn/dreiding/dreiding_conformational_energetics>
    Retraining DREIDING: refitting the generators, and testing whether they transfer <nb/ffnn/dreiding/dreiding_refit_aromatics>
 
+Semiempirical methods (sqmnn)
+=============================
+
+The tables of the PM3, PM6, PM7 and PM6-ORG papers reproduced with the published
+parameters: heats of formation, dipoles and ionization potentials, the modified
+core-core terms, and the S22 / S66 interaction energies; then the parameters refit
+by gradient descent and written back for MOPAC.
+
+.. example-toctree::
+   :caption: Semiempirical methods (sqmnn)
+
+   PM3 heats of formation, dipole moments and ionization potentials (Stewart 1989) <nb/sqmnn/pm3/pm3_heats_of_formation>
+   PM6: the modified NDDO approximations of the 2007 paper <nb/sqmnn/pm6/pm6_approximations>
+   Noncovalent interactions: PM7 (S22, S66) and PM6-ORG <nb/sqmnn/pm7/pm7_pm6org_noncovalent>
+   Refitting NDDO parameters: hydrogen bonds, MOPAC export and force training <nb/sqmnn/training/sqmnn_parameter_refit>
+
 Deployment: MDI (common)
 ========================
 
@@ -315,6 +331,7 @@ reference (:ref:`fidelity`), ending with a weight transplant.
    BAMBOO fidelity check: `xnn` vs the original `bytedance/bamboo`, block by block <nb/fidelity_checks/bamboo_verification>
    OPLS: verifying the `xnn` implementation against OpenMM and the 1996 paper <nb/fidelity_checks/opls_verification>
    DREIDING: verifying the `xnn` implementation against LAMMPS and the 1990 paper <nb/fidelity_checks/dreiding_verification>
+   PM3, PM6, PM6-ORG and PM7 against the MOPAC program <nb/fidelity_checks/sqmnn_verification>
 
 Parity checks
 =============

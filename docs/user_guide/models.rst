@@ -457,6 +457,32 @@ Also ``bond_style`` (harmonic / morse), ``angle_style``, ``hbond``,
 ``switch_width``. Set resonance types such as an amide ``C_R``-``N_R``
 explicitly; automatic perception does not.
 
+Semiempirical methods: PM3, PM6, PM6-ORG, PM7
+=============================================
+:class:`~xnn.sqmnn.models.PM6` and its siblings (``sqmnn`` family) are the
+NDDO semiempirical Hartree-Fock methods of Stewart: a minimal ``spd``
+valence basis, multipole two-center integrals, a self-consistent field per
+molecule and the method's core-core repulsion and corrections (PM7 dispersion
+and hydrogen bonds, PM6-ORG D3H4). ``energy`` is the heat of formation in eV;
+the outputs also hold ``heat_of_formation`` (kcal/mol), ``charges`` and
+``dipole``. With the published parameters (the default) the methods
+reproduce MOPAC; ``trainable`` makes parameter groups refittable, with
+exact gradients through the SCF.
+
+.. code-block:: python
+
+   from xnn.sqmnn.models import PM6, PM7
+
+   model = PM7()                                     # published parameters
+   model = PM6(trainable=["BETAS", "BETAP", "ALPB"])  # refit by gradient descent
+   model.parameter_set()                             # write_parameters() -> MOPAC EXTERNAL file
+
+Also ``parameters`` (a set name or a MOPAC ``EXTERNAL`` file), ``corrections``,
+``unrestricted``, ``tol_density``. Molecules only (no periodic cells); open
+shells are spin-unrestricted. The published values are not shipped with xnn:
+the first use of a method downloads them from the MOPAC 23.2.5 sources into
+the model cache.
+
 Add-ons for any model
 =====================
 Wrappers that add physics to any model above, enabled from the ``model``

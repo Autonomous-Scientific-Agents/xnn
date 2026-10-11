@@ -12,7 +12,7 @@ runnable version of this page.
 
    from xnn.common.data import load_dataset, list_datasets
 
-   list_datasets()   # ['ani1', 'ani1ccx', 'ani1x', 'ani2x', 'argon_md', 'ethanol_response', 'hdnnp4g', 'lode_dimers', 'qm7', 'rmd17', 'spookynet_states']
+   list_datasets()   # ['ani1', 'ani1ccx', 'ani1x', 'ani2x', 'argon_md', 'ethanol_response', 'hdnnp4g', 'lode_dimers', 'qm7', 'rmd17', 's22', 's66', 'spookynet_states']
 
    splits = load_dataset("rmd17", molecule="aspirin")                 # {"train": [...], "test": [...]}
    train = load_dataset("rmd17", molecule="aspirin", split="train")   # one list of structures
@@ -59,6 +59,10 @@ Each dataset takes its own keyword arguments (full list in :ref:`data`):
    # LODE dimers: binding curves with per-frame metadata
    cc = load_dataset("lode_dimers", subset="bio", label="CC", split="all", return_info=True)
    binding = cc[0]["energy"] - cc[0]["info"]["energyA"] - cc[0]["info"]["energyB"]
+
+   # S22 / S66 noncovalent dimers: fragment labels and reference interaction energies
+   dimers = load_dataset("s66", split="all")
+   dimers[0]["fragment"], dimers[0]["interaction_energy"]       # per-atom 0 / 1, kcal/mol
 
 The ANI sets need the ``hub`` extra (``h5py``). The ``split`` of the ANI sets
 (``train`` / ``val`` / ``test``) is the paper's per-molecule 80/10/10

@@ -169,6 +169,10 @@ Standard benchmark datasets download, convert and cache in one call:
 - ``lode_dimers``: the LODE non-bonded sets (biomolecular dimers, monomers,
   point charges, xenon). Options ``subset``, ``label``, ``return_info``; the
   bundled ``bio_scan`` subset loads offline.
+- ``s22`` / ``s66``: the S22 and S66 noncovalent dimers at their reference
+  geometries with per-atom ``fragment`` labels and CCSD(T)/CBS
+  ``interaction_energy`` (kcal/mol). Option ``reference`` (``original`` or,
+  for S22, ``revised``).
 
 Files are cached and MD5-verified under ``datasets/<name>/`` (``cache_dir``,
 ``XNN_DATASETS`` or ``XNN_CACHE`` change that). The ANI sets need the ``hub``
