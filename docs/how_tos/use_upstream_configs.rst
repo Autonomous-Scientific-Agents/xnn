@@ -30,7 +30,9 @@ CACE's constructor keywords (``zs``, ``num_message_passing``,
 ``type_message_passing``), schnetpack's SchNet keys (``n_atom_basis``,
 ``n_gaussians``, ``atomref``) and the DimeNet keys (``emb_size``,
 ``num_blocks``, ``num_radial``, ``num_spherical``, ``int_emb_size``,
-``out_emb_size``) and the RuNNer ``input.nn`` names of the HDNNP options
+``out_emb_size``), the GemNet ``model_kwargs`` (``emb_size_atom``,
+``emb_size_edge``, ``emb_size_trip``, ``num_atom``, ``triplets_only``,
+``envelope_exponent``, ``scale_file``, ...) and the RuNNer ``input.nn`` names of the HDNNP options
 (``nnp_generation``, ``elements``, ``atom_energy``, ``default_nodes``,
 ``default_activation_nn``) translate the same way. When both spellings
 appear, the xnn one wins. Values are coerced too: per-species energies can be

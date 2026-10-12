@@ -99,4 +99,4 @@ Bundled configs
      train.yaml          training config with a Hydra-style defaults list
      benchmark.yaml      benchmark config
      data/default.yaml
-     model/{mace,nequip,allegro,cace,aimnet2,schnet,dimenet,dimenet_pp,painn,spookynet,se3cnn,cnn3d,physnet,hdnnp,ani,bamboo,reaxff,opls,dreiding}.yaml
+     model/{mace,nequip,allegro,cace,aimnet2,schnet,dimenet,dimenet_pp,gemnet,gemnet_t,painn,spookynet,se3cnn,cnn3d,physnet,hdnnp,ani,bamboo,reaxff,opls,dreiding}.yaml

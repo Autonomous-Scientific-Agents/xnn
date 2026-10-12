@@ -132,7 +132,7 @@ Models at a glance
    * - Family
      - Models
    * - Graph neural networks (``gnn``)
-     - MACE, NequIP, Allegro, CACE, AIMNet2, SchNet, DimeNet, DimeNet++, PaiNN
+     - MACE, NequIP, Allegro, CACE, AIMNet2, SchNet, DimeNet, DimeNet++, GemNet, PaiNN
    * - Dense neural networks (``dnn``)
      - ANI (ANI-1, ANI-1x, ANI-1ccx, ANI-2x), PhysNet, HDNNP (generations 1 to 4)
    * - Convolutional neural networks (``cnn``)
@@ -148,7 +148,7 @@ Models at a glance
 
 Each model matches its reference code or paper to round-off
 (:ref:`fidelity`); the MACE and AIMNet2 foundation models load through the
-hub. Every model trains, evaluates and runs under ASE. SchNet, DimeNet, PaiNN, SpookyNet,
+hub. Every model trains, evaluates and runs under ASE. SchNet, DimeNet, GemNet, PaiNN, SpookyNet,
 NequIP, MACE, Allegro and AIMNet2 also export to TorchScript for LAMMPS, and any
 checkpoint serves as an MDI engine (:ref:`deployment`).
 

@@ -80,9 +80,13 @@ Equivariant edge features (``xnn.gnn.featurizers``)
   :class:`~xnn.gnn.featurizers.cutoff.PolynomialCutoff`: the trainable
   Bessel basis and polynomial envelope of NequIP, MACE and DimeNet.
 - :class:`~xnn.gnn.featurizers.spherical_bessel.SphericalBesselBasis`: the
-  2D spherical Fourier-Bessel basis of DimeNet, ``n_spherical`` degrees
-  times ``n_radial`` Bessel roots over a distance and an angle; plain
-  PyTorch, no scipy.
+  2D spherical Fourier-Bessel basis of DimeNet and GemNet, ``n_spherical``
+  degrees times ``n_radial`` Bessel roots over a distance and an angle;
+  plain PyTorch, no scipy.
+- :func:`~xnn.gnn.featurizers.spherical_bessel.real_spherical_harmonics`:
+  real spherical harmonics as Cartesian polynomials, smooth at the poles;
+  with the radial part above they form GemNet's 3D basis over a distance
+  and two angles.
 
 .. code-block:: python
 

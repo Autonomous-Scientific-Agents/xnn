@@ -48,6 +48,11 @@ identical weights involves:
   <https://github.com/gasteigerjo/dimenet>`_, TensorFlow): about 1e-13
   relative in energies and forces under transplanted weights in float64;
   the published DimeNet++ QM9 model reproduces to float32 round-off.
+- **GemNet** (`TUM-DAML/gemnet_pytorch
+  <https://github.com/TUM-DAML/gemnet_pytorch>`_): about 1e-13 relative in
+  energies and forces under transplanted weights in float64, for GemNet-Q,
+  -T, -dQ and -dT; the published GemNet-Q and GemNet-T weights reproduce to
+  float32 round-off.
 - **PaiNN** (Schütt *et al.* 2021; reference implementation in
   `schnetpack <https://github.com/atomistic-machine-learning/schnetpack>`_):
   a build from the paper, verified against an independent implementation
