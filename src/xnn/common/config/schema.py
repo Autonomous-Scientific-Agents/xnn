@@ -255,6 +255,85 @@ class OptimConfig:
     train_only: list[str] = field(default_factory=list)   # patterns of the only parameters to train
 
 
+@dataclass
+class TrainerConfig:
+    """Logging, error metrics, checkpointing and stopping of a training run.
+
+    Attributes
+    ----------
+    loggers : list of str
+        Where the metrics go: any of ``console``, ``csv`` (``metrics.csv`` in
+        ``output_dir``) and ``tensorboard`` (``output_dir/tensorboard``).
+        Defaults to ``["console"]``.
+    log_every_n_epochs : int
+        Log the epoch metrics every n epochs (and after the last). Defaults to ``1``.
+    log_every_n_steps : int
+        When ``> 0``, also log the training values every n optimizer steps.
+        Defaults to ``0``.
+    step_average : str
+        What a step value is: ``"batch"`` (that step's batch) or
+        ``"running"`` (the epoch so far). Defaults to ``"batch"``.
+    metrics : list of str
+        Error metrics computed besides the loss terms, from ``mae`` and
+        ``rmse``, for every labelled property (energy per atom, forces,
+        stress, dipole, polarizability, charges). Defaults to both.
+    monitor : str
+        The logged value that picks ``best.pt``, drives the plateau scheduler
+        and early stopping, e.g. ``val/forces_mae``. A ``val/`` monitor falls
+        back to ``train/`` without a validation set. Defaults to ``"val/loss"``.
+    mode : str
+        ``"min"`` or ``"max"``: whether a lower or a higher monitored value is
+        better. Defaults to ``"min"``.
+    val_every_n_epochs : int
+        Validate every n epochs (and after the last). Defaults to ``1``.
+    save_every_n_epochs : int
+        When ``> 0``, also keep ``epoch_<n>.pt`` every n epochs. Defaults to ``0``.
+    early_stopping_patience : int
+        Stop after this many validations without improvement of the
+        monitored value; ``0`` (default) never stops early.
+    early_stopping_min_delta : float
+        The least change that counts as an improvement. Defaults to ``0.0``.
+    early_stopping_threshold : float, optional
+        Stop as soon as the monitored value is better than this. Defaults to
+        ``None``.
+    progress_bar : bool
+        Show a progress bar over each epoch's batches. Defaults to ``False``.
+    """
+
+    loggers: list[str] = field(default_factory=lambda: ["console"])   # console / csv / tensorboard
+    log_every_n_epochs: int = 1
+    log_every_n_steps: int = 0         # > 0 also logs the training values every n steps
+    step_average: str = "batch"        # batch / running (the epoch so far)
+    metrics: list[str] = field(default_factory=lambda: ["mae", "rmse"])
+    monitor: str = "val/loss"          # picks best.pt, drives plateau and early stopping
+    mode: str = "min"                  # min / max
+    val_every_n_epochs: int = 1
+    save_every_n_epochs: int = 0       # > 0 keeps epoch_<n>.pt
+    early_stopping_patience: int = 0   # validations without improvement; 0 = off
+    early_stopping_min_delta: float = 0.0
+    early_stopping_threshold: Optional[float] = None   # stop once better than this
+    progress_bar: bool = False
+
+    def validate(self) -> None:
+        """Normalize the list options and reject unknown names."""
+        from ..train.loggers import LOGGERS
+        for key, known in (("loggers", LOGGERS), ("metrics", ("mae", "rmse"))):
+            value = getattr(self, key)
+            value = [value] if isinstance(value, str) else list(value or [])
+            value = [str(x).lower() for x in value]
+            unknown = [x for x in value if x not in known]
+            if unknown:
+                raise ValueError(f"trainer.{key}: unknown {unknown}; use any of {sorted(known)}")
+            setattr(self, key, value)
+        if self.mode not in ("min", "max"):
+            raise ValueError(f"trainer.mode must be min or max, got {self.mode!r}")
+        if self.step_average not in ("batch", "running"):
+            raise ValueError(f"trainer.step_average must be batch or running, got {self.step_average!r}")
+        for key in ("log_every_n_epochs", "val_every_n_epochs"):
+            if int(getattr(self, key)) < 1:
+                raise ValueError(f"trainer.{key} must be at least 1")
+
+
 _RECORD_NOTES = ("dataset", "note")   # free-text annotations allowed in the record
 
 
@@ -339,6 +418,9 @@ class Config:
         Random seed for reproducibility. MACE ``seed``. Defaults to ``1234``.
     output_dir : str
         Directory for run outputs (checkpoints, logs). Defaults to ``"runs/exp"``.
+    trainer : TrainerConfig
+        Logging, error metrics, checkpointing and stopping. Defaults to a
+        fresh :class:`TrainerConfig`.
     subtracted_dispersion : dict, optional
         What was subtracted from the training labels before fitting, so that
         a deployment adds it back: ``{"name": "d4", "s6": ..., "s8": ...,
@@ -356,6 +438,7 @@ class Config:
     model: ModelConfig = field(default_factory=ModelConfig)
     data: DataConfig = field(default_factory=DataConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
+    trainer: TrainerConfig = field(default_factory=TrainerConfig)
     device: str = "auto"               # auto / cpu / cuda / cuda:0 ...
     seed: int = 1234                   # MACE seed
     output_dir: str = "runs/exp"
@@ -377,5 +460,6 @@ class Config:
                              f"got {self.data.replay_filter!r}")
         if self.optim.optimizer.lower() not in ("adam", "amsgrad", "adamw"):
             raise ValueError(f"optim.optimizer must be adam, amsgrad or adamw, got {self.optim.optimizer!r}")
+        self.trainer.validate()
         self.subtracted_dispersion = normalize_subtracted_dispersion(
             self.subtracted_dispersion, self.model)

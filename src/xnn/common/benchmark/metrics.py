@@ -162,6 +162,85 @@ def _scored(data: AtomicGraph, mask: Tensor | None, term: str | None = None) -> 
     return keep
 
 
+def prediction_pairs(out: dict, data: AtomicGraph, targets: list[str],
+                     atomic_energies: Tensor | None = None,
+                     energy_per_atom: bool = True) -> dict[str, tuple[Tensor, Tensor]]:
+    """The scored ``(prediction, reference)`` pairs of one batch, as flat detached tensors.
+
+    The per-batch step of :func:`collect_predictions` (see there for the
+    energy handling and which labels are scored); the trainer accumulates
+    its error metrics from the same pairs.
+
+    Parameters
+    ----------
+    out : dict of str to Tensor
+        The model output for ``data``.
+    data : AtomicGraph
+        The batch with its labels.
+    targets : list of str
+        Quantities to pair, as in :func:`collect_predictions`.
+    atomic_energies : torch.Tensor or None, optional
+        Per-element reference energies to subtract, as in :func:`collect_predictions`.
+    energy_per_atom : bool, optional
+        Divide energies by the atom count. Defaults to ``True``.
+
+    Returns
+    -------
+    dict of str to (Tensor, Tensor)
+        The targets present in the batch and in ``out``, on the batch's device.
+    """
+    pairs: dict[str, tuple[Tensor, Tensor]] = {}
+    if "energy" in targets and data.energy is not None and "energy" in out:
+        e_pred, e_ref = out["energy"], data.energy
+        if atomic_energies is not None:
+            e0 = atomic_energies.to(e_pred.device, e_pred.dtype)
+            e0_sum = scatter_sum(
+                e0[data.atomic_numbers], data.batch, data.num_graphs)
+            e_pred = e_pred - e0_sum
+            e_ref = e_ref - e0_sum
+        if energy_per_atom:
+            n = data.n_atoms.to(e_pred.dtype)
+            e_pred = e_pred / n
+            e_ref = e_ref / n
+        mask = _scored(data, data.energy_mask, "energy_weight")
+        if mask is not None:
+            e_pred, e_ref = e_pred[mask], e_ref[mask]
+        pairs["energy"] = (e_pred.detach(), e_ref.detach())
+    # a batch mixing labelled and unlabelled structures scores the labelled ones
+    if "forces" in targets and data.forces is not None and "forces" in out:
+        f_pred, f_ref = out["forces"].detach(), data.forces.detach()
+        mask = _scored(data, data.forces_mask, "force_weight")
+        atoms = None if mask is None else mask[data.batch]
+        if data.atom_force_weight is not None:
+            nonzero = data.atom_force_weight != 0
+            atoms = nonzero if atoms is None else atoms & nonzero
+        if atoms is not None:
+            f_pred, f_ref = f_pred[atoms], f_ref[atoms]
+        pairs["forces"] = (f_pred.reshape(-1), f_ref.reshape(-1))
+    if "stress" in targets and data.stress is not None and "stress" in out:
+        s_pred, s_ref = out["stress"].detach(), data.stress.detach()
+        mask = _scored(data, data.stress_mask, "stress_weight")
+        if mask is not None:
+            s_pred, s_ref = s_pred[mask], s_ref[mask]
+        pairs["stress"] = (s_pred.reshape(-1), s_ref.reshape(-1))
+    for key in ("dipole", "polarizability"):
+        ref = getattr(data, key, None)
+        if key in targets and ref is not None and key in out:
+            t_pred, t_ref = out[key].detach(), ref.detach()
+            mask = _scored(data, getattr(data, key + "_mask", None))
+            if mask is not None:
+                t_pred, t_ref = t_pred[mask], t_ref[mask]
+            pairs[key] = (t_pred.reshape(-1), t_ref.reshape(-1))
+    if "charges" in targets and data.charges is not None and "charges" in out:
+        q_pred, q_ref = out["charges"].detach(), data.charges.detach()
+        mask = _scored(data, data.charges_mask)
+        if mask is not None:
+            atoms = mask[data.batch]
+            q_pred, q_ref = q_pred[atoms], q_ref[atoms]
+        pairs["charges"] = (q_pred.reshape(-1), q_ref.reshape(-1))
+    return pairs
+
+
 def collect_predictions(model, loader, device, targets: list[str],
                         atomic_energies: Tensor | None = None,
                         energy_per_atom: bool = True,
@@ -228,60 +307,10 @@ def collect_predictions(model, loader, device, targets: list[str],
 
     for data in loader:
         data = data.to(device)
-        out = model(data)
-        if "energy" in targets and data.energy is not None and "energy" in out:
-            e_pred, e_ref = out["energy"], data.energy
-            if atomic_energies is not None:
-                e0 = atomic_energies.to(e_pred.device, e_pred.dtype)
-                e0_sum = scatter_sum(
-                    e0[data.atomic_numbers], data.batch, data.num_graphs)
-                e_pred = e_pred - e0_sum
-                e_ref = e_ref - e0_sum
-            if energy_per_atom:
-                n = data.n_atoms.to(e_pred.dtype)
-                e_pred = e_pred / n
-                e_ref = e_ref / n
-            mask = _scored(data, data.energy_mask, "energy_weight")
-            if mask is not None:
-                e_pred, e_ref = e_pred[mask], e_ref[mask]
-            preds["energy"].append(e_pred.detach().cpu())
-            refs["energy"].append(e_ref.detach().cpu())
-        # a batch mixing labelled and unlabelled structures scores the labelled ones
-        if "forces" in targets and data.forces is not None and "forces" in out:
-            f_pred, f_ref = out["forces"].detach(), data.forces.detach()
-            mask = _scored(data, data.forces_mask, "force_weight")
-            atoms = None if mask is None else mask[data.batch]
-            if data.atom_force_weight is not None:
-                nonzero = data.atom_force_weight != 0
-                atoms = nonzero if atoms is None else atoms & nonzero
-            if atoms is not None:
-                f_pred, f_ref = f_pred[atoms], f_ref[atoms]
-            preds["forces"].append(f_pred.reshape(-1).cpu())
-            refs["forces"].append(f_ref.reshape(-1).cpu())
-        if "stress" in targets and data.stress is not None and "stress" in out:
-            s_pred, s_ref = out["stress"].detach(), data.stress.detach()
-            mask = _scored(data, data.stress_mask, "stress_weight")
-            if mask is not None:
-                s_pred, s_ref = s_pred[mask], s_ref[mask]
-            preds["stress"].append(s_pred.reshape(-1).cpu())
-            refs["stress"].append(s_ref.reshape(-1).cpu())
-        for key in ("dipole", "polarizability"):
-            ref = getattr(data, key, None)
-            if key in targets and ref is not None and key in out:
-                t_pred, t_ref = out[key].detach(), ref.detach()
-                mask = _scored(data, getattr(data, key + "_mask", None))
-                if mask is not None:
-                    t_pred, t_ref = t_pred[mask], t_ref[mask]
-                preds[key].append(t_pred.reshape(-1).cpu())
-                refs[key].append(t_ref.reshape(-1).cpu())
-        if "charges" in targets and data.charges is not None and "charges" in out:
-            q_pred, q_ref = out["charges"].detach(), data.charges.detach()
-            mask = _scored(data, data.charges_mask)
-            if mask is not None:
-                atoms = mask[data.batch]
-                q_pred, q_ref = q_pred[atoms], q_ref[atoms]
-            preds["charges"].append(q_pred.reshape(-1).cpu())
-            refs["charges"].append(q_ref.reshape(-1).cpu())
+        pairs = prediction_pairs(model(data), data, targets, atomic_energies, energy_per_atom)
+        for t, (p, r) in pairs.items():
+            preds[t].append(p.cpu())
+            refs[t].append(r.cpu())
 
     out_pairs: dict[str, tuple[Tensor, Tensor]] = {}
     for t in targets:

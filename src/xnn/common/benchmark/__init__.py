@@ -32,7 +32,7 @@ from .config import (
 )
 from .metrics import (
     register_metric, get_metric, available_metrics, load_custom_metric,
-    collect_predictions, score,
+    collect_predictions, prediction_pairs, score,
 )
 from .energy import build_e0_lookup, fit_atomic_energies
 from .report import (
@@ -46,7 +46,7 @@ from .runner import (
 __all__ = [
     "BenchmarkConfig", "ModelEntry", "OutputConfig", "from_dict", "from_yaml",
     "register_metric", "get_metric", "available_metrics", "load_custom_metric",
-    "collect_predictions", "score", "build_e0_lookup", "fit_atomic_energies",
+    "collect_predictions", "prediction_pairs", "score", "build_e0_lookup", "fit_atomic_energies",
     "register_writer", "available_writers", "write", "write_all",
     "format_table", "apply_units",
     "Benchmark", "run_benchmark", "select_entries", "merge_parts", "run_parallel",

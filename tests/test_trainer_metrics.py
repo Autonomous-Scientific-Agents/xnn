@@ -10,7 +10,7 @@ from xnn.common.config import from_dict
 from xnn.common.data import AtomicDataset, collate, structure_to_graph
 from xnn.common.train import Trainer
 from xnn.common.train.losses import weighted_loss
-from xnn.common.train.trainer import _summary
+from xnn.common.train.loggers import ConsoleLogger, _summary
 
 BOX = 6.0
 CUTOFF = 3.0
@@ -74,7 +74,7 @@ def test_evaluate_equals_one_batch_of_all_structures(tmp_path):
     o = cfg.optim
     _, ref = weighted_loss(trainer.eval_module(data), data,
                            o.energy_weight, o.force_weight, o.stress_weight)
-    assert set(got) == set(ref)
+    assert set(ref) <= set(got)
     for key in ref:
         assert got[key] == pytest.approx(ref[key], rel=1e-10), key
 
@@ -84,6 +84,35 @@ def test_evaluate_equals_one_batch_of_all_structures(tmp_path):
                                                                   collate_fn=collate))])
     assert abs(naive - ref["loss"]) > 1e-3 * ref["loss"]
 
+
+
+def test_best_checkpoint_is_the_lowest_dataset_level_val_loss(tmp_path):
+    """best.pt scored on the whole validation set reproduces the lowest logged val/loss."""
+    from xnn.common.train import Logger
+
+    class Record(Logger):
+        def __init__(self):
+            self.val = []
+
+        def log_metrics(self, metrics, step):
+            if "val/loss" in metrics:
+                self.val.append(metrics["val/loss"])
+
+    cfg = _cfg(tmp_path)
+    cfg.optim.epochs, cfg.optim.lr, cfg.optim.scheduler = 6, 2e-2, "none"
+    rec = Record()
+    val = AtomicDataset(_structures(), CUTOFF)
+    trainer = Trainer(cfg, AtomicDataset(_structures(), CUTOFF), val, logger=rec)
+    trainer.fit()
+    assert len(set(rec.val)) == len(rec.val)
+
+    ckpt = torch.load(tmp_path / "best.pt", weights_only=False)
+    trainer.eval_module.load_state_dict(ckpt["model"])
+    data = collate([val[i] for i in range(len(val))])
+    o = cfg.optim
+    _, ref = weighted_loss(trainer.eval_module(data), data,
+                           o.energy_weight, o.force_weight, o.stress_weight)
+    assert ref["loss"] == pytest.approx(min(rec.val), rel=1e-10)
 
 def _slice(pred, data, lo, hi):
     """The predictions of structures lo..hi-1 of a collated batch."""
@@ -138,8 +167,10 @@ def test_log_line_reports_the_terms(capsys):
     """The epoch line shows the train and validation terms and the head losses."""
     tr = {"loss": 1.5, "energy_mse": 0.25, "force_mse": 0.125}
     va = {"loss": 2.0, "a/energy_mse": 0.5, "a/loss": 0.5, "b/loss": 1.5}
-    Trainer._log(3, tr, va)
+    ConsoleLogger().log_metrics({"epoch": 3, "lr": 1e-3, **{f"train/{k}": v for k, v in tr.items()},
+                                 **{f"val/{k}": v for k, v in va.items()}}, step=30)
     line = capsys.readouterr().out
     assert "train loss 1.5000e+00 (energy 2.500e-01, force 1.250e-01)" in line
     assert "val loss 2.0000e+00 (a 5.000e-01, b 1.500e+00)" in line
+    assert line.startswith("epoch    3 | ")
     assert _summary({}) == "0.0000e+00"

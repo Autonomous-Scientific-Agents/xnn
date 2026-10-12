@@ -33,17 +33,18 @@ Install only what you need:
 
 .. code-block:: bash
 
-   pip install "xnns[gnn]"        # e3nn: NequIP, MACE, Allegro
-   pip install "xnns[ase]"        # ASE calculator, reading structure files
-   pip install "xnns[vesin]"      # cell-list neighbor lists for large systems
-   pip install "xnns[hub]"        # h5py, for the ANI datasets of the data hub
-   pip install "xnns[ffnn]"       # RDKit, for typing molecules with OPLS / DREIDING
-   pip install "xnns[mdi]"        # pymdi, for the MDI engine (xnn mdi)
-   pip install "xnns[hydra]"      # Hydra / OmegaConf config frontend
-   pip install "xnns[dev]"        # pytest
-   pip install "xnns[docs]"       # Sphinx and the docs theme
-   pip install "xnns[examples]"   # everything the example notebooks need
-   pip install "xnns[all]"        # gnn, ase, vesin, hydra, dev and examples
+   pip install "xnns[gnn]"          # e3nn: NequIP, MACE, Allegro
+   pip install "xnns[ase]"          # ASE calculator, reading structure files
+   pip install "xnns[vesin]"        # cell-list neighbor lists for large systems
+   pip install "xnns[hub]"          # h5py, for the ANI datasets of the data hub
+   pip install "xnns[ffnn]"         # RDKit, for typing molecules with OPLS / DREIDING
+   pip install "xnns[mdi]"          # pymdi, for the MDI engine (xnn mdi)
+   pip install "xnns[hydra]"        # Hydra / OmegaConf config frontend
+   pip install "xnns[tensorboard]"  # TensorBoard training logs
+   pip install "xnns[dev]"          # pytest
+   pip install "xnns[docs]"         # Sphinx and the docs theme
+   pip install "xnns[examples]"     # everything the example notebooks need
+   pip install "xnns[all]"          # gnn, ase, vesin, hydra, tensorboard, dev and examples
 
 The parity notebooks and tests compare against reference packages, which have
 their own extras: ``ani`` (torchani), ``d3`` (simple-dftd3), ``d4`` (dftd4)

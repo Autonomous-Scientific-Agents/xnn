@@ -12,17 +12,18 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from .schema import Config, ModelConfig, DataConfig, OptimConfig
+from .schema import Config, ModelConfig, DataConfig, OptimConfig, TrainerConfig
 from .translate import translate_model_keys
 
-_SECTIONS = {"model": ModelConfig, "data": DataConfig, "optim": OptimConfig}
+_SECTIONS = {"model": ModelConfig, "data": DataConfig, "optim": OptimConfig,
+             "trainer": TrainerConfig}
 
 
 def from_dict(d: dict[str, Any]) -> Config:
     """Build a typed :class:`Config` from a plain nested dict.
 
     This is the funnel every frontend loader passes through. Recognized
-    sections (``model``, ``data``, ``optim``) are dispatched to their dataclass;
+    sections (``model``, ``data``, ``optim``, ``trainer``) are dispatched to their dataclass;
     the ``model`` section first has upstream key spellings translated to the
     xnn canonical names (:func:`~xnn.common.config.translate.translate_model_keys`),
     then unknown keys inside it are collected into ``ModelConfig.extra``. Known

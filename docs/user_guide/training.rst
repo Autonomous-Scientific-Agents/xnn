@@ -23,7 +23,7 @@ given, ``data.val_fraction`` and ``data.test_fraction`` carve them out of
 the training set with the run's seed.
 
 ``fit()`` validates every epoch and writes ``best.pt`` (lowest validation
-loss) and ``last.pt`` to ``cfg.output_dir``. A test set is evaluated once
+loss, or another monitored value) and ``last.pt`` to ``cfg.output_dir``. A test set is evaluated once
 after the last epoch. A checkpoint holds the state dict and the config, and
 loads with ``from_pretrained(path)``; to score the best checkpoint on the
 test set, load it and call :meth:`~xnn.common.train.trainer.Trainer.evaluate`.
@@ -31,7 +31,8 @@ test set, load it and call :meth:`~xnn.common.train.trainer.Trainer.evaluate`.
 (:ref:`howto-pretrained-models`).
 
 Each epoch line prints the loss and its terms (``energy``, ``force``,
-``stress``, ...) for the training and validation sets. Every value is a
+``stress``, ...) for the training and validation sets, then the validation
+MAE and RMSE. Every value is a
 mean over the whole set, weighted like the loss (structures for energy,
 atoms for forces), so batch sizes and partially labelled batches do not
 skew it; the training values are gathered while the weights change.
@@ -46,6 +47,89 @@ every epoch.
 .. code-block:: python
 
    trainer = Trainer(cfg, train_set, val_set, train_batch_sampler=my_sampler)
+
+Metrics, checkpoints and stopping
+=================================
+Besides the loss terms, every split reports the MAE and RMSE of each
+labelled property (``energy_mae`` per atom, ``forces_rmse``, ``stress_mae``,
+``dipole_*``, ``polarizability_*``, ``charges_*``), pooled over the whole set.
+The ``trainer`` section decides what drives the run:
+
+.. code-block:: yaml
+
+   trainer:
+     metrics: [mae, rmse]
+     monitor: val/forces_mae       # picks best.pt, drives plateau and early stopping
+     mode: min
+     val_every_n_epochs: 1
+     save_every_n_epochs: 0        # > 0 also keeps epoch_<n>.pt
+     early_stopping_patience: 20   # validations without improvement; 0 = off
+     early_stopping_min_delta: 0.0
+     early_stopping_threshold: 0.02  # stop once forces_mae < 0.02
+
+Any logged key can be monitored. Without a validation set ``val/`` reads as
+``train/``. In Python these are callbacks
+(:mod:`~xnn.common.train.callbacks`), and you can pass your own:
+
+.. code-block:: python
+
+   from xnn.common.train import Callback, EarlyStopping, ModelCheckpoint
+
+   class Snapshot(Callback):
+       def on_epoch_end(self, trainer, epoch, metrics):
+           if epoch % 50 == 0:
+               trainer.save(f"runs/exp/epoch_{epoch}.pt")
+
+   trainer = Trainer(cfg, train_set, val_set, callbacks=[
+       ModelCheckpoint(monitor="val/energy_rmse", filename="best_energy.pt"),
+       EarlyStopping(monitor="val/forces_mae", patience=30),
+       Snapshot()])
+
+A callback has ``on_fit_start``, ``on_train_epoch_start``,
+``on_train_batch_end``, ``on_epoch_end`` (set ``trainer.should_stop`` to
+end the run), ``on_train_end`` and ``on_fit_end``. The epoch metrics it sees
+are the dataset-level values, identical on every rank.
+
+Logging
+=======
+The metrics go to the loggers in ``trainer.loggers``: ``console`` (the
+epoch lines), ``csv`` (``metrics.csv`` and ``hparams.yaml`` in
+``output_dir``) and ``tensorboard`` (``output_dir/tensorboard``, needs the
+``tensorboard`` extra).
+
+.. code-block:: yaml
+
+   trainer:
+     loggers: [console, csv, tensorboard]
+     log_every_n_epochs: 1
+     log_every_n_steps: 0        # > 0 also logs training values every n steps
+     step_average: batch         # step values: the batch, or running (the epoch so far)
+     progress_bar: false
+
+Every logged epoch carries ``epoch``, ``lr``, ``train/<key>`` and
+``val/<key>``, the test set ``test/<key>``, and step values
+``train_step/<key>``, all at the optimizer step count. In Python, pass
+loggers to the trainer, or subclass
+:class:`~xnn.common.train.loggers.Logger`:
+
+.. code-block:: python
+
+   from xnn.common.train import ConsoleLogger, Logger, TensorBoardLogger
+
+   class PrintBest(Logger):
+       best = float("inf")
+
+       def log_metrics(self, metrics, step):
+           if metrics.get("val/loss", self.best) < self.best:
+               self.best = metrics["val/loss"]
+               print(f"new best {self.best:.4e} at step {step}")
+
+   trainer = Trainer(cfg, train_set, val_set,
+                     logger=[ConsoleLogger(errors=False), TensorBoardLogger("tb_logs"), PrintBest()])
+
+``TensorBoardLogger.experiment`` is the ``SummaryWriter`` itself, for
+histograms or images, and ``trainer.log_metrics(...)`` sends extra values to
+every logger. Only rank 0 logs.
 
 The loss
 ========
