@@ -1,0 +1,29 @@
+# GemNet-Q, the paper architecture (Gasteiger, Becker & Guennemann, NeurIPS 2021,
+# App. F and Table 6): 4 interaction blocks, atom and edge embeddings of 128,
+# N_RBF = 6, N_SHBF = 7, embedding cutoff 5 A, interaction cutoff 10 A,
+# envelope exponent 5. Scaling factors are fitted on training data at the start.
+name: gemnet
+cutoff: 5.0                       # embedding cutoff c_emb (graphs are built to int_cutoff)
+n_features: 128
+n_interactions: 4
+n_rbf: 6
+extra:
+  int_cutoff: 10.0
+  n_spherical: 7
+  n_edge_features: 128
+  n_triplet_features: 64
+  n_quadruplet_features: 32
+  n_rbf_features: 16
+  n_cbf_features: 16
+  n_sbf_features: 32
+  n_bilinear_triplet: 64
+  n_bilinear_quadruplet: 32
+  n_before_skip: 1
+  n_after_skip: 1
+  n_concat: 1
+  n_atom_residual: 2
+  p: 5
+  quadruplets: true               # false: GemNet-T (one-hop message passing only)
+  direct_forces: false            # true: GemNet-dQ / -dT
+  # species: [1, 6, 8]
+  # atomic_energies: average      # per-element reference energies from the training set
