@@ -3,7 +3,8 @@
 We always appreciate your contributions. This guide explains what we need from
 you so that an issue can be reproduced and a pull request can be merged without
 rounds of back-and-forth. Contributions that follow this guide are often handled
-first.
+first. Everyone taking part in the project is expected to follow our
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 - [Before you start](#before-you-start)
 - [Reporting a bug](#reporting-a-bug)
