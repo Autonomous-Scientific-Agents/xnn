@@ -338,7 +338,10 @@ class Benchmark:
         """
         for entry in self.entries:
             model, cfg = self._load_model(entry)
-            dataset = self._dataset(cfg.model.cutoff)
+            # the model's own neighbor-list radius (GemNet-Q's interaction
+            # cutoff and dispersion wrappers reach beyond the config cutoff)
+            dataset = self._dataset(max(float(cfg.model.cutoff),
+                                        float(getattr(model, "cutoff", None) or 0.0)))
             e0 = self._atomic_energies(dataset)
             self.rows.append(
                 self._score(model, self._loader(dataset), entry, e0))

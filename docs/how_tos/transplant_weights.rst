@@ -62,6 +62,11 @@ with the transplant for its model; the notes per model:
   the map rescales the basis layers and the model takes
   ``reference_basis=True``; ``tests/dimenet_tf_parity.py`` holds the map and
   applies it to random weights and to the published DimeNet++ QM9 model.
+- **GemNet**: same framework; the map permutes the shared basis projections
+  and bilinear weights, reorders the spherical-harmonic orders and shifts
+  the atom embeddings to index by ``Z``. ``tests/gemnet_parity.py`` holds it
+  and applies it to random weights of all variants and to the published
+  GemNet-Q and GemNet-T weights.
 - **LES**: the upstream latent-charge head and Ewald settings map into
   ``LatentEwald(CACE)``.
 - **SchNet**: a clean-room build from the paper, verified against an

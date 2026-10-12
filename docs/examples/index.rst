@@ -99,6 +99,22 @@ SchNet trained on 1000 structures, with the learned 2D filters.
    DimeNet from the paper: bases, smoothness, directionality, and the DimeNet++ speed-up <nb/gnn/dimenet/dimenet_paper_checks>
    DimeNet and DimeNet++ on rMD17 ethanol: energies and forces from 1000 structures <nb/gnn/dimenet/dimenet_rmd17_train>
 
+GemNet (gnn)
+============
+
+The geometric message passing paper (Gasteiger *et al.*, NeurIPS 2021)
+checked with untrained models: the three bases, triplets and quadruplets,
+what the dihedral angle adds, the variance scaling of Fig. 3, smoothness at
+both cutoffs, direct versus conservative forces and the cost of the variants.
+Then GemNet-T, -Q and -dT trained on rMD17 ethanol, with NVE energy
+conservation.
+
+.. example-toctree::
+   :caption: GemNet (gnn)
+
+   GemNet from the paper: bases, two-hop message passing, variance scaling, direct forces <nb/gnn/gemnet/gemnet_paper_checks>
+   GemNet on rMD17 ethanol: GemNet-T, GemNet-Q and direct forces <nb/gnn/gemnet/gemnet_rmd17_train>
+
 PaiNN (gnn)
 ===========
 
@@ -314,6 +330,7 @@ reference (:ref:`fidelity`), ending with a weight transplant.
    3D steerable CNN, block by block: the kernel basis, equivariance and the reference implementation <nb/fidelity_checks/se3cnn_verification>
    Spherical CNN, block by block: harmonic analysis, correlations, equivariance and the reference implementation <nb/fidelity_checks/s2cnn_verification>
    DimeNet and DimeNet++ against the authors' TensorFlow implementation, including the published QM9 model <nb/fidelity_checks/dimenet_verification>
+   GemNet against the reference implementation, including the published weights <nb/fidelity_checks/gemnet_verification>
    PaiNN, block by block: the paper's equations and the reference implementation <nb/fidelity_checks/painn_verification>
    SpookyNet, block by block: the paper's equations and the reference implementation <nb/fidelity_checks/spookynet_verification>
    HDNNP (2G, 3G, 4G) against the RuNNer code, including a published 4G model <nb/fidelity_checks/hdnnp_verification>

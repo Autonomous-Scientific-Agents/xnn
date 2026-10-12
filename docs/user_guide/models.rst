@@ -183,6 +183,40 @@ Also ``n_bilinear`` (dimenet), ``n_triplet_features`` /
 ``n_basis_features`` / ``n_output_features`` (dimenet++), ``p``,
 ``trainable_rbf``. The reference code's key spellings are translated.
 
+GemNet
+======
+:class:`~xnn.gnn.models.gemnet.GemNet`: geometric message passing
+(Gasteiger *et al.* 2021). Directed edge embeddings are updated from
+neighboring edges into the same atom (distance and angle) and, with
+``quadruplets``, from edges two hops away across an interaction edge
+(adding the dihedral angle). Scaling factors replace normalization layers;
+the trainer fits them on training structures before the first epoch. No
+e3nn. Matches `TUM-DAML/gemnet_pytorch
+<https://github.com/TUM-DAML/gemnet_pytorch>`_.
+
+.. code-block:: yaml
+
+   model:
+     name: gemnet
+     cutoff: 5.0                 # embedding cutoff
+     n_features: 128
+     n_interactions: 4
+     n_rbf: 6
+     int_cutoff: 10.0            # graphs are built to this radius
+     n_spherical: 7
+     quadruplets: true           # false: GemNet-T
+     direct_forces: false        # true: GemNet-dQ / -dT
+     species: [1, 6, 8]
+     atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
+
+Also ``n_edge_features``, ``n_triplet_features`` / ``n_quadruplet_features``,
+``n_rbf_features`` / ``n_cbf_features`` / ``n_sbf_features``,
+``n_bilinear_triplet`` / ``n_bilinear_quadruplet``, ``p``,
+``forces_coupled``, ``scaling_factors`` (a dict or the reference code's JSON
+file) and ``fit_scaling: false``. Direct forces are not conservative and
+cannot be combined with LES or dispersion terms or exported to TorchScript.
+The reference code's key spellings are translated.
+
 PaiNN
 =====
 :class:`~xnn.gnn.models.painn.PaiNN`: equivariant message passing with

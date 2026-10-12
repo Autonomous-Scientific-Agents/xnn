@@ -89,7 +89,7 @@ class ForceStressOutput(nn.Module):
             ``forces``
                 Present when ``compute_forces`` is set; per-atom forces of shape
                 ``(N, 3)`` computed as ``F = -dE/dr`` (autograd with respect to
-                positions).
+                positions), or the model's own when it predicts them directly.
             ``stress``
                 Present when ``compute_stress`` is set and the batch has a cell;
                 the symmetric stress tensor of shape ``(B, 3, 3)`` computed as
@@ -129,10 +129,15 @@ class ForceStressOutput(nn.Module):
 
         out = self.model(data)
         energy = out["energy"]
+        # a model that predicts forces directly (GemNet-dT/dQ) returns them itself
+        direct = "forces" in out
+        if direct and "energy_sr" in out:
+            raise ValueError("a model with direct force prediction cannot be combined with "
+                             "add-on energy terms (long-range, dispersion)")
 
         grad_outputs = torch.ones_like(energy)
         inputs, need = [], []
-        if self.compute_forces:
+        if self.compute_forces and not direct:
             inputs.append(data.pos); need.append("pos")
         if strain is not None:
             inputs.append(strain); need.append("strain")
@@ -151,7 +156,7 @@ class ForceStressOutput(nn.Module):
                 create_graph=create_graph, retain_graph=create_graph, allow_unused=True,
             )
             g = dict(zip(need, grads))
-        if self.compute_forces:
+        if self.compute_forces and not direct:
             out["forces"] = -g["pos"] if g.get("pos") is not None else torch.zeros_like(data.pos)
         if strain is not None:
             if g.get("strain") is not None:

@@ -167,6 +167,68 @@ def zonal_harmonics(l_max: int, cos_alpha: Tensor) -> Tensor:
     return torch.stack(out, dim=-1).to(cos_alpha.dtype)
 
 
+def real_spherical_harmonics(l_max: int, x: Tensor, y: Tensor, z: Tensor) -> Tensor:
+    """Real spherical harmonics ``Y_lm`` of a unit vector, degrees 0 to ``l_max``.
+
+    Orthonormal on the sphere, without the Condon-Shortley phase:
+    ``Y_l0 = N_l0 P_l(z)``, ``Y_lm = sqrt(2) N_lm P_l^m(z) cos(m phi)`` and
+    ``Y_l,-m = sqrt(2) N_lm P_l^m(z) sin(m phi)`` for ``m > 0``, with
+    ``N_lm = sqrt((2l+1)/(4 pi) (l-m)!/(l+m)!)``. They are evaluated as
+    polynomials in the Cartesian components (float64 internally), so they are
+    smooth everywhere on the sphere, the poles included.
+
+    Parameters
+    ----------
+    l_max : int
+        Highest degree.
+    x, y, z : Tensor
+        Components of unit vectors, all of the same shape; ``z`` is the polar
+        axis and the azimuth is measured from ``x`` towards ``y``.
+
+    Returns
+    -------
+    Tensor
+        Shape ``(..., (l_max + 1)**2)``, degree-major with ``m = -l .. l``
+        within each degree (column ``l**2 + l + m``), in the dtype of ``z``.
+    """
+    x64, y64, z64 = x.to(torch.float64), y.to(torch.float64), z.to(torch.float64)
+    # cos/sin parts r^m (cos m phi, sin m phi) = Re/Im (x + i y)^m
+    cos_m: List[Tensor] = [torch.ones_like(z64)]
+    sin_m: List[Tensor] = [torch.zeros_like(z64)]
+    for m in range(l_max):
+        cos_m.append(cos_m[m] * x64 - sin_m[m] * y64)
+        sin_m.append(sin_m[m] * x64 + cos_m[m] * y64)
+    # q[l][m] = P_l^m(z) / sin^m(theta): polynomials in z, from the
+    # recurrences of the associated Legendre functions
+    q: List[List[Tensor]] = []
+    for l in range(l_max + 1):
+        q.append([torch.zeros_like(z64) for _ in range(l + 1)])
+    double_factorial = 1.0
+    for m in range(l_max + 1):
+        if m > 0:
+            double_factorial *= 2 * m - 1
+        q[m][m] = torch.full_like(z64, double_factorial)
+        if m + 1 <= l_max:
+            q[m + 1][m] = (2 * m + 1) * z64 * q[m][m]
+        for l in range(m + 2, l_max + 1):
+            q[l][m] = ((2 * l - 1) * z64 * q[l - 1][m] - (l + m - 1) * q[l - 2][m]) / (l - m)
+    out: List[Tensor] = []
+    for l in range(l_max + 1):
+        for m in range(-l, l + 1):
+            a = abs(m)
+            ratio = 1.0                                   # (l - a)! / (l + a)!
+            for k in range(l - a + 1, l + a + 1):
+                ratio = ratio / k
+            norm = math.sqrt((2 * l + 1) / (4.0 * math.pi) * ratio)
+            if m == 0:
+                out.append(norm * q[l][0])
+            elif m > 0:
+                out.append(math.sqrt(2.0) * norm * q[l][a] * cos_m[a])
+            else:
+                out.append(math.sqrt(2.0) * norm * q[l][a] * sin_m[a])
+    return torch.stack(out, dim=-1).to(z.dtype)
+
+
 class SphericalBesselBasis(nn.Module):
     """The 2D spherical Fourier-Bessel basis ``a_ln(d, alpha)`` of DimeNet (eq 6).
 

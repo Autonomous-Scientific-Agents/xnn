@@ -30,6 +30,23 @@ test set, load it and call :meth:`~xnn.common.train.trainer.Trainer.evaluate`.
 ``trainer.save_pretrained("my-model")`` writes a portable model directory
 (:ref:`howto-pretrained-models`).
 
+Each epoch line prints the loss and its terms (``energy``, ``force``,
+``stress``, ...) for the training and validation sets. Every value is a
+mean over the whole set, weighted like the loss (structures for energy,
+atoms for forces), so batch sizes and partially labelled batches do not
+skew it; the training values are gathered while the weights change.
+
+The training loader reshuffles every epoch. To batch differently, for
+instance molecules and periodic cells in separate batches of their own
+sizes, pass ``train_batch_sampler`` (and ``val_batch_sampler`` /
+``test_batch_sampler``): any iterable of index lists over the dataset as
+given, with an optional ``set_epoch(epoch)`` that the trainer calls before
+every epoch.
+
+.. code-block:: python
+
+   trainer = Trainer(cfg, train_set, val_set, train_batch_sampler=my_sampler)
+
 The loss
 ========
 A weighted sum of the per-property errors:
@@ -91,7 +108,10 @@ changes, only a launcher that sets ``RANK``, ``LOCAL_RANK`` and
 
 Each rank is pinned to its GPU, every loader is sharded, metrics are
 all-reduced so the best-checkpoint decision and the scheduler agree across
-ranks, and only rank 0 prints and writes. Checkpoints hold the bare model
+ranks, and only rank 0 prints and writes. Validation and test shards are
+disjoint, so their metrics equal a serial run's; the training shards are
+padded to equal length, repeating up to ``WORLD_SIZE - 1`` structures per
+epoch. A custom batch sampler must yield each rank's own share. Checkpoints hold the bare model
 and are interchangeable with serial runs. ``data.batch_size`` is per
 process, so the effective batch is ``batch_size × WORLD_SIZE``. Sharded
 strategies (FSDP, DeepSpeed) are not supported: force and stress losses

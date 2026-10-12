@@ -157,8 +157,8 @@ Standard benchmark datasets download, convert and cache in one call:
 - ``hdnnp4g``: the four charge-transfer benchmarks of the 4G-HDNNP paper
   with energies, forces and Hirshfeld charges, as one ``all`` split (needs
   ase). Option ``system``: ``carbon_chain``, ``ag_clusters``,
-  ``nacl_clusters`` or ``au2_mgo`` (periodic). The molecular sets are
-  CC BY-NC 4.0.
+  ``nacl_clusters``, ``au2_mgo`` (periodic) or ``au2_mgo_minima`` (its four
+  DFT-optimized structures). The molecular sets and the minima are CC BY-NC 4.0.
 - ``spookynet_states``: the electronic-state sets of the SpookyNet paper,
   2200 Ag3+ / Ag3- clusters or singlet / triplet CH2 molecules at GFN2-xTB
   with total charges, spin multiplicities, energies, forces and dipoles.

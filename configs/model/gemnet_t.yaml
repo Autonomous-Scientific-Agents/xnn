@@ -1,0 +1,18 @@
+# GemNet-T (Gasteiger, Becker & Guennemann, NeurIPS 2021): GemNet without the
+# two-hop (quadruplet) message passing, one cutoff of 5 A. The paper's MD17 model.
+name: gemnet
+cutoff: 5.0
+n_features: 128
+n_interactions: 4
+n_rbf: 6
+extra:
+  quadruplets: false
+  n_spherical: 7
+  n_edge_features: 128
+  n_triplet_features: 64
+  n_rbf_features: 16
+  n_cbf_features: 16
+  n_bilinear_triplet: 64
+  direct_forces: false            # true: GemNet-dT
+  # species: [1, 6, 8]
+  # atomic_energies: average
