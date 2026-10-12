@@ -175,7 +175,7 @@ for name, ds in (("val", val), ("test", test)):
     data = collate([ds[i] for i in range(len(ds))])
     _, ref = weighted_loss(trainer.eval_module(data), data,
                            o.energy_weight, o.force_weight, o.stress_weight)
-    assert set(metrics[name]) == set(ref), (name, metrics[name], ref)
+    assert set(ref) <= set(metrics[name]), (name, metrics[name], ref)
     for k in ref:
         assert abs(metrics[name][k] - ref[k]) <= 1e-5 * abs(ref[k]), (name, k, metrics[name][k], ref[k])
 # after fit() has ended the process group, evaluate() still scores the whole set
@@ -206,3 +206,39 @@ def test_ddp_reshuffles_and_reports_dataset_metrics(tmp_path):
         # DistributedSampler pads 9 structures to 10: one repeats
         assert len(both) == 10 and sorted(set(both)) == list(range(9))
     assert any(s["0"] != s["1"] for s in seen)
+
+
+# an output head without labels or weight (a PaiNN dipole head trained on
+# energies and forces only) leaves its parameters without gradients under DDP
+_SCRIPT_UNUSED_HEAD = """
+import numpy as np
+
+from xnn.common.config import from_dict
+from xnn.common.data import AtomicDataset
+from xnn.common.train import Trainer
+
+rng = np.random.default_rng(0)
+structs = [{"pos": rng.uniform(0, 4, (4, 3)), "atomic_numbers": [1, 6, 8, 1],
+            "energy": float(rng.normal()), "forces": rng.normal(0, 1, (4, 3))}
+           for _ in range(8)]
+cfg = from_dict({"model": {"name": "painn", "n_features": 8, "n_interactions": 1, "n_rbf": 4,
+                           "cutoff": 3.0, "extra": {"dipole": True, "polarizability": True}},
+                 "optim": {"epochs": 2},
+                 "data": {"batch_size": 2, "val_fraction": 0.25},
+                 "device": "cpu", "output_dir": OUTPUT_DIR})
+trainer = Trainer(cfg, AtomicDataset(structs, cfg.model.cutoff))
+assert trainer.distributed
+assert trainer.fit()["train"]["loss"] > 0
+"""
+
+
+def test_ddp_heads_without_labels(tmp_path):
+    script = tmp_path / "train_ddp_unused.py"
+    script.write_text(f"OUTPUT_DIR = {str(tmp_path)!r}\n" + _SCRIPT_UNUSED_HEAD)
+    result = subprocess.run(
+        [sys.executable, "-m", "torch.distributed.run",
+         "--nproc-per-node", "2",
+         "--rdzv-backend", "c10d", "--rdzv-endpoint", "localhost:0",
+         str(script)],
+        capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
