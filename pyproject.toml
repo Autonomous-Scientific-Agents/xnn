@@ -65,6 +65,8 @@ mdi = ["pymdi>=1.4"]
 # past a few hundred atoms practical. See common/data/neighborlist.py.
 vesin = ["vesin-torch>=0.3"]
 hydra = ["hydra-core>=1.3", "omegaconf>=2.3"]
+# TensorBoardLogger (loggers: [tensorboard]); console and CSV logging need nothing.
+tensorboard = ["tensorboard>=2.10"]
 dev = ["pytest"]
 docs = [
     "sphinx>=7",
@@ -114,6 +116,7 @@ all = [
     "vesin-torch>=0.3",
     "hydra-core>=1.3",
     "omegaconf>=2.3",
+    "tensorboard>=2.10",
     "pytest",
     "mace-torch==0.3.16",
     "nequip==0.6.2",
