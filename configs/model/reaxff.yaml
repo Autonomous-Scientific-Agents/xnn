@@ -4,6 +4,7 @@ ffield: CHO_cho_2008      # parameter library: a ReaxFF field shipped with xnn (
 species: null             # subset of the library's species (default: all of them)
 nn: null                  # ReaxFF-nn neural bond blocks (default: on iff the library has weights)
 messages: null            # message-passing steps T (default: the library's value)
-hb_short: 6.75            # hydrogen-bond X..Z taper window, lower edge
-hb_long: 7.5              # hydrogen-bond X..Z taper window, upper edge
-trainable: []             # classical parameter groups to refit, e.g. [Desi, be1, V2]; "all" for every group
+conventions: null         # lammps (LAMMPS pair_style reaxff) or reaxff-nn (default: reaxff-nn iff nn is on)
+hb_short: 6.75            # reaxff-nn: hydrogen-bond X..Z taper window, lower edge
+hb_long: 7.5              # reaxff-nn: upper edge of that window; lammps: H..Z cutoff
+trainable: []             # classical parameter groups to refit, e.g. [Desi, ang_val1, tor_V2]; "all" for every group

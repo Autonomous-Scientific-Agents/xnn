@@ -414,12 +414,19 @@ Returns ``charges`` and the per-term energies.
 .. code-block:: python
 
    from xnn.ffnn.models import ReaxFF
+   from xnn.ffnn.models.ffield import to_forcefield
 
-   model = ReaxFF("CHO_cho_2008", cutoff=10.0, trainable=("bond", "angle"))
-   model.export_library().save_frc("refit.frc")
+   model = ReaxFF("CHO_cho_2008", trainable=("Desi", "ang_val1"))
+   to_forcefield(model.export_library()).write("refit.frc")
 
 The parameters are a shipped ``.frc`` field by name, a ``.frc`` path or a
 ReaxFF-nn JSON library (:ref:`howto-forcefield-files`).
+
+``conventions`` picks how the terms are evaluated. ``"lammps"``, the default
+for classical fields, reproduces LAMMPS ``pair_style reaxff`` with
+``fix qeq/reaxff``, so a field refit here runs unchanged in LAMMPS.
+``"reaxff-nn"``, the default for ReaxFF-nn libraries, follows the behavior
+those libraries were trained with.
 
 OPLS / L-OPLS
 =============

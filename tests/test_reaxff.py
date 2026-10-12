@@ -24,9 +24,13 @@ from xnn.common.data import AtomicDataset, collate, structure_to_graph
 from xnn.common.models import ForceStressOutput, build_model
 from xnn.ffnn.models import ReaxFF, read_ffield, template_library
 from xnn.ffnn.models.ffield import (default_pair_cutoff, dedup_torsion_types,
-                                     resolve_torsion, to_forcefield)
-from xnn.ffnn.models.reaxff import (KCAL_TO_EV, KE, nonbonded_taper,
-                                     reverse_edge_permutation, taper_up)
+                                     lammps_pair_parameters, resolve_torsion,
+                                     to_forcefield)
+from xnn.ffnn.models.reaxff import (KCAL_TO_EV, KE, LAMMPS_C_ELE,
+                                     LAMMPS_EV_TO_KCAL, LAMMPS_PI,
+                                     LAMMPS_QEQ_KE, LAMMPS_THB_CUT,
+                                     nonbonded_taper, reverse_edge_permutation,
+                                     taper_up)
 
 
 @pytest.fixture(autouse=True)
@@ -82,10 +86,12 @@ def test_uncorrected_bond_order_equation():
     assert torch.allclose(it["bop_pp"], torch.full((2,), e3), atol=1e-8)
 
 
-def test_bond_order_corrections_and_bond_energy_equations():
+@pytest.mark.parametrize("conventions", ["lammps", "reaxff-nn"])
+def test_bond_order_corrections_and_bond_energy_equations(conventions):
     """Corrections f1/f4/f5 (eq 3) and E_bond (eq 5) for a dimer, by hand."""
     lib = template_library(["C"], nn=False)
-    model = ReaxFF(lib, nn=False, keep_intermediates=True)
+    model = ReaxFF(lib, nn=False, conventions=conventions,
+                   keep_intermediates=True)
     r = 1.35
     g = _graph([[0, 0, 0], [r, 0, 0]], [6, 6], model.cutoff)
     out = model(g)
@@ -111,24 +117,35 @@ def test_bond_order_corrections_and_bond_energy_equations():
     desi = p["Desi_C-C"] * KCAL_TO_EV
     depi = p["Depi_C-C"] * KCAL_TO_EV
     depp = p["Depp_C-C"] * KCAL_TO_EV
-    esi = desi * bosi * math.exp(p["be1_C-C"] * (1.0 - (bosi + 1e-9) ** p["be2_C-C"]))
+    guard = 0.0 if conventions == "lammps" else 1e-9
+    esi = desi * bosi * math.exp(p["be1_C-C"] * (1.0 - (bosi + guard) ** p["be2_C-C"]))
     e_bond = -(esi + depi * bopi + depp * bopp)   # one bond
     assert abs(float(out["e_bond"][0]) - e_bond) < 1e-10
 
 
-def test_eem_two_atom_analytic():
+@pytest.mark.parametrize("conventions", ["lammps", "reaxff-nn"])
+def test_eem_two_atom_analytic(conventions):
     """EEM charges of a heteronuclear dimer match the analytic solution."""
     lib = template_library(["C", "O"], nn=False)
-    model = ReaxFF(lib, nn=False)
+    model = ReaxFF(lib, nn=False, conventions=conventions)
     r = 2.0
     g = _graph([[0, 0, 0], [r, 0, 0]], [6, 8], model.cutoff)
     out = model(g)
     p = lib.p
     gamma = math.sqrt(p["gamma_C"] * p["gamma_O"])
     tap = float(nonbonded_taper(torch.tensor(r), model.cutoff))
-    h = KE * tap / (r ** 3 + (1.0 / gamma) ** 3) ** (1.0 / 3.0)
+    kernel = tap / (r ** 3 + (1.0 / gamma) ** 3) ** (1.0 / 3.0)
+    if conventions == "lammps":
+        # fix qeq/reaxff solves with 14.4 eV A; the energy uses C_ele and
+        # converts the self energy with 23.02 kcal/mol per eV
+        k_solve, k_coul = LAMMPS_QEQ_KE, LAMMPS_C_ELE * KCAL_TO_EV
+        self_scale = LAMMPS_EV_TO_KCAL * KCAL_TO_EV
+    else:
+        k_solve = k_coul = KE
+        self_scale = 1.0
     # stationarity of E(q) = sum_i (chi_i q_i + mu_i q_i^2) + H q_C q_O
     # under q_C + q_O = 0:  q_C = (chi_O - chi_C) / (2 mu_C + 2 mu_O - 2 H)
+    h = k_solve * kernel
     q_c = (p["chi_O"] - p["chi_C"]) / (2 * p["mu_C"] + 2 * p["mu_O"] - 2 * h)
     q = out["charges"]
     assert abs(float(q[0]) - q_c) < 1e-9
@@ -136,8 +153,8 @@ def test_eem_two_atom_analytic():
     # E_self and E_Coulomb from the same charges, by hand
     e_self = q_c * p["chi_C"] + q_c ** 2 * p["mu_C"] \
         + (-q_c) * p["chi_O"] + q_c ** 2 * p["mu_O"]
-    assert abs(float(out["e_self"][0]) - e_self) < 1e-9
-    assert abs(float(out["e_coulomb"][0]) - h * q_c * (-q_c)) < 1e-9
+    assert abs(float(out["e_self"][0]) - self_scale * e_self) < 1e-9
+    assert abs(float(out["e_coulomb"][0]) - k_coul * kernel * q_c * (-q_c)) < 1e-9
 
 
 def test_total_charge_constraint():
@@ -183,9 +200,10 @@ def test_angle_geometry_and_count():
 
 
 def test_angle_energy_equation_water():
-    """The valence-angle energy of water reproduces eqs 8a-8d, by hand."""
+    """The ReaxFF-nn valence-angle energy of water reproduces eqs 8a-8d."""
     lib = template_library(["O", "H"], nn=False)
-    model = ReaxFF(lib, nn=False, keep_intermediates=True)
+    model = ReaxFF(lib, nn=False, conventions="reaxff-nn",
+                   keep_intermediates=True)
     d, ang = 0.96, math.radians(104.5)
     pos = [[0, 0, 0], [d, 0, 0], [d * math.cos(ang), d * math.sin(ang), 0]]
     g = _graph(pos, [8, 1, 1], model.cutoff)
@@ -263,9 +281,10 @@ def test_torsion_enumeration_chain():
 
 
 def test_hydrogen_bond_term():
-    """A linear O-H..O motif produces the eq-18-style H-bond energy."""
+    """A linear O-H..O motif gives the ReaxFF-nn H-bond energy."""
     lib = template_library(["O", "H"], nn=False)
-    model = ReaxFF(lib, nn=False, keep_intermediates=True)
+    model = ReaxFF(lib, nn=False, conventions="reaxff-nn",
+                   keep_intermediates=True)
     # donor O-H at 0.98, acceptor O at 1.9 from H, collinear
     pos = [[0, 0, 0], [0.98, 0, 0], [2.88, 0, 0], [3.4, 0.9, 0]]
     z = [8, 1, 8, 1]                      # second H saturates the acceptor
@@ -295,6 +314,178 @@ def test_hydrogen_bond_term():
     assert abs(float(it["ehb"][idx]) - ehb) < 1e-8
 
 
+# LAMMPS conventions (pair_style reaxff + fix qeq/reaxff)
+def _bonded_edge(g, it, i, j):
+    """Index of the directed bonded edge dst=i, src=j."""
+    b_src = g.edge_index[0][it["bond_mask"]]
+    b_dst = g.edge_index[1][it["bond_mask"]]
+    return int(((b_dst == i) & (b_src == j)).nonzero()[0])
+
+
+def _water_dimer():
+    """A hydrogen-bonded water dimer: O0-H1..O3, H1..O3 = 1.94 Angstrom."""
+    pos = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0],
+           [2.90, 0.0, 0.0], [3.20, 0.90, 0.20], [3.20, -0.50, 0.80]]
+    return np.array(pos), np.array([8, 1, 1, 8, 1, 1])
+
+
+def test_default_conventions():
+    """Classical libraries default to the LAMMPS conventions, ReaxFF-nn to its own."""
+    assert _model(nn=False).conventions == "lammps"
+    assert _model(nn=True).conventions == "reaxff-nn"
+    with pytest.raises(ValueError):
+        _model(nn=False, conventions="gulp")
+
+
+def test_lammps_pair_parameter_rules():
+    """Radii take the arithmetic mean, vdW the geometric; positive overrides win."""
+    p = {"rosi_A": 1.0, "rosi_B": 2.0, "ropi_A": -0.1, "ropi_B": 1.0,
+         "ropp_A": 1.0, "ropp_B": 1.0, "Devdw_A": 0.1, "Devdw_B": 0.4,
+         "rvdw_A": 1.0, "rvdw_B": 4.0, "alfa_A": 9.0, "alfa_B": 16.0,
+         "rosi_A-B": -1.0, "ropi_A-B": -1.0, "ropp_A-B": 0.7, "Devdw_A-B": 0.3,
+         "rvdw_A-B": -1.0, "alfa_A-B": 11.0}
+    lammps_pair_parameters(p, ["A", "B"], ["A-B"])
+    assert p["rosi_A-B"] == p["rosi_B-A"] == pytest.approx(1.5)
+    assert p["ropi_A-B"] == pytest.approx(0.45)
+    assert p["ropp_A-B"] == pytest.approx(0.7)
+    assert p["Devdw_A-B"] == pytest.approx(0.3)
+    assert p["rvdw_A-B"] == pytest.approx(2.0)
+    assert p["alfa_A-B"] == pytest.approx(11.0)
+    assert p["rosi_B-B"] == pytest.approx(2.0)
+
+
+def test_lammps_bond_list():
+    """Bonds reach as far as the bond order does; H has no pi channel."""
+    lib = read_ffield("CHO_cho_2008")
+    r = 2.2                                     # beyond the 2.0 A X-H heuristic
+    g = _graph([[0, 0, 0], [r, 0, 0]], [8, 1], 10.0)
+    model = ReaxFF(lib, conventions="lammps", keep_intermediates=True)
+    model(g)
+    it = model.intermediates
+    assert int(it["bond_mask"].sum()) == 2
+    p = lib.p
+    botol = 0.01 * p["cutoff"]
+    e1 = (1.0 + botol) * math.exp(p["bo1_O-H"] * (r / p["rosi_O-H"]) ** p["bo2_O-H"])
+    assert torch.allclose(it["bop_si"], torch.full((2,), e1 - botol), atol=1e-10)
+    assert torch.all(it["bop_pi"] == 0.0) and torch.all(it["bop_pp"] == 0.0)
+    nn_conv = ReaxFF(lib, conventions="reaxff-nn", keep_intermediates=True)
+    nn_conv(g)
+    assert int(nn_conv.intermediates["bond_mask"].sum()) == 0
+
+
+def test_lammps_angle_energy_equation_water():
+    """The LAMMPS valence-angle energy of water, by hand."""
+    lib = template_library(["O", "H"], nn=False)
+    model = ReaxFF(lib, keep_intermediates=True)
+    d, ang = 0.96, math.radians(104.5)
+    pos = [[0, 0, 0], [d, 0, 0], [d * math.cos(ang), d * math.sin(ang), 0]]
+    g = _graph(pos, [8, 1, 1], model.cutoff)
+    out = model(g)
+    it = model.intermediates
+    p = lib.p
+    assert it["theta"].shape == (1,)
+    e01 = _bonded_edge(g, it, 0, 1)
+    b_dst = g.edge_index[1][it["bond_mask"]]
+    delta_o, dpi_o, nlp_o = (float(it[k][0]) for k in ("delta", "dpi", "nlp"))
+    pbo = math.exp(-sum(float(b) ** 8 for b, i in zip(it["bo0"], b_dst) if int(i) == 0))
+    delta_e = delta_o - p["vale_O"]
+    vlpex = delta_e - 2.0 * int(delta_e / 2.0)
+    sbo = dpi_o - (1.0 - pbo) * (delta_o - p["valang_O"]
+                                 + p["val8"] * (0.0 if vlpex >= 0 else nlp_o))
+    if 0.0 < sbo <= 1.0:
+        sbo2 = sbo ** p["val9"]
+    elif 1.0 < sbo < 2.0:
+        sbo2 = 2.0 - (2.0 - sbo) ** p["val9"]
+    else:
+        sbo2 = 0.0 if sbo <= 0 else 2.0
+    theta0 = (180.0 - p["theta0_H-O-H"] * (1.0 - math.exp(-p["val10"] * (2.0 - sbo2)))) \
+        * LAMMPS_PI / 180.0
+    boa = float(it["bo0"][e01]) - LAMMPS_THB_CUT
+    f7arm = 1.0 - math.exp(-p["val3_O"] * boa ** p["val4_H-O-H"])
+    dang = delta_o - p["valang_O"]
+    exp6 = math.exp(p["val6"] * dang)
+    exp7 = math.exp(-p["val7_H-O-H"] * dang)
+    f8 = p["val5_O"] - (p["val5_O"] - 1.0) * (2.0 + exp6) / (1.0 + exp6 + exp7)
+    eang = f7arm ** 2 * f8 * p["val1_H-O-H"] * KCAL_TO_EV \
+        * (1.0 - math.exp(-p["val2_H-O-H"] * (theta0 - ang) ** 2))
+    assert abs(float(out["e_angle"][0]) - eang) < 1e-9
+
+
+def test_lammps_hydrogen_atoms_center_angles_and_torsions():
+    """A hydrogen-bonded water dimer has H-centered angles and torsions."""
+    model = ReaxFF("CHOLiNaKCsFClI_Fedkin_2019", species=["H", "O"],
+                   keep_intermediates=True)
+    pos, z = _water_dimer()
+    g = _graph(pos, z, model.cutoff)
+    out = model(g)
+    it = model.intermediates
+    assert 1 in it["angle_center"].tolist()               # O0-H1..O3
+    assert 1 in it["tor_j"].tolist() + it["tor_k"].tolist()
+    assert float(out["e_hbond"][0]) < 0.0
+    nn_conv = ReaxFF("CHOLiNaKCsFClI_Fedkin_2019", species=["H", "O"],
+                     conventions="reaxff-nn", keep_intermediates=True)
+    nn_conv(g)
+    assert 1 not in nn_conv.intermediates["angle_center"].tolist()
+
+
+def test_lammps_hydrogen_bond_term():
+    """A bent O-H..O motif gives the LAMMPS H-bond energy, by hand."""
+    lib = template_library(["O", "H"], nn=False)
+    model = ReaxFF(lib, keep_intermediates=True)
+    t = math.radians(15.0)
+    h = np.array([0.98, 0.0, 0.0])
+    o2 = h + 1.9 * np.array([math.cos(t), math.sin(t), 0.0])
+    pos = [[0, 0, 0], h, o2, o2 + [0.52, 0.8, 0.0]]
+    g = _graph(pos, [8, 1, 8, 1], model.cutoff)
+    model(g)
+    it = model.intermediates
+    p = lib.p
+    triples = list(zip(it["hb_x"].tolist(), it["hb_h"].tolist(), it["hb_z"].tolist()))
+    idx = triples.index((0, 1, 2))
+    bo_oh = float(it["bo0"][_bonded_edge(g, it, 1, 0)])
+    cos_th = math.cos(math.pi - t)                        # X-H-Z angle, 165 deg
+    ehb = p["Dehb_O-H-O"] * KCAL_TO_EV * (1.0 - math.exp(-p["hb1_O-H-O"] * bo_oh)) \
+        * math.exp(-p["hb2_O-H-O"] * (p["rohb_O-H-O"] / 1.9 + 1.9 / p["rohb_O-H-O"] - 2.0)) \
+        * (0.5 - 0.5 * cos_th) ** 2
+    assert abs(float(it["ehb"][idx]) - ehb) < 1e-10
+
+
+def test_lammps_forces_hold_charges_fixed():
+    """LAMMPS-convention forces are the gradient at fixed charges."""
+    model = _model(nn=False)
+    fs = ForceStressOutput(model)
+    pos, z = _methanol()
+    g = _graph(pos, z, model.cutoff)
+    forces = fs(g)["forces"].detach().numpy()
+    q0 = model(g)["charges"].detach()
+    model._eem_charges = lambda *args: q0
+
+    def energy(pp):
+        return float(model(_graph(pp, z, model.cutoff))["energy"][0])
+
+    d = 1e-5
+    for (i, c) in [(0, 0), (1, 1), (3, 2), (5, 0)]:
+        pp, pm = pos.copy(), pos.copy()
+        pp[i, c] += d
+        pm[i, c] -= d
+        assert abs(forces[i, c] + (energy(pp) - energy(pm)) / (2 * d)) < 1e-6
+
+
+def test_fedkin_field_ships():
+    """The Fedkin 2019 electrolyte-water field loads with its H-bond roles."""
+    lib = read_ffield("CHOLiNaKCsFClI_Fedkin_2019")
+    assert lib.name == "reaxff/CHOLiNaKCsFClI_Fedkin_2019"
+    assert set(lib.spec) == {"H", "Li", "C", "O", "F", "Na", "Cl", "K", "I", "Cs"}
+    # its general-block slots 35/36 hold unrelated settings, not thresholds
+    assert lib.p["acut"] == pytest.approx(1e-4) and lib.p["hbtol"] == pytest.approx(1e-4)
+    assert lib.p["theta0_H-O-H"] == pytest.approx(85.8)
+    assert lib.p["Dehb_O-H-O"] == pytest.approx(-3.58)
+    model = ReaxFF(lib, species=["H", "O", "Na", "Cl"])
+    assert model.conventions == "lammps"
+    assert model.hb_flag.tolist() == [1, 2, 0, 2]
+    assert model.vdw_type == 1
+
+
 # invariances, forces, batching
 @pytest.mark.parametrize("nn", [False, True])
 def test_rotation_translation_invariance(nn):
@@ -321,7 +512,7 @@ def test_rotation_translation_invariance(nn):
 @pytest.mark.parametrize("nn", [False, True])
 def test_forces_match_finite_differences(nn):
     """Autograd forces equal central finite differences of the energy."""
-    model = _model(nn=nn)
+    model = _model(nn=nn, conventions="reaxff-nn")
     fs = ForceStressOutput(model)
     pos, z = _methanol()
     g = _graph(pos, z, model.cutoff)
@@ -413,6 +604,8 @@ def test_trainable_selection_and_step():
     # frozen-by-default classical model exposes no trainable classical params
     frozen = _model(nn=False)
     assert not any(p.requires_grad for p in frozen.params.values())
+    with pytest.raises(ValueError, match="unknown trainable group"):
+        _model(nn=False, trainable=("bond", "angle"))
 
 
 def test_training_step_reduces_loss():
@@ -456,7 +649,9 @@ def test_frc_roundtrip_of_template_library(tmp_path):
     assert parsed.angs == lib.angs and parsed.torp == lib.torp
     assert parsed.hbs == lib.hbs
     shared = set(lib.p) & set(parsed.p)
-    assert shared >= {k for k in lib.p if not k.startswith("n.u.")}
+    # the per-species reference energy has no column in the format
+    assert shared >= {k for k in lib.p
+                      if not k.startswith(("n.u.", "atomic_"))}
     assert max(abs(lib.p[k] - parsed.p[k]) for k in shared) == 0.0
     # the seed's own thresholds survive (published fields, with zeros in
     # those slots, get the customary 1e-4 instead)
@@ -499,7 +694,8 @@ def test_published_ffield_parses():
     assert p["Dehb_O-H-O"] == pytest.approx(-4.4628)   # hbond: Ehb
     # the heat increments are carried but, as in LAMMPS, not part of the energy
     assert lib.heat_increment["C"] == pytest.approx(199.03)
-    assert "atomic_C" in p and p["atomic_C"] == pytest.approx(0.0)
+    assert p["acore2_C"] == pytest.approx(0.0)        # atomic: Acore,2
+    assert "atomic_C" not in p
     model = ReaxFF(lib, nn=False)
     g = _graph([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]], [6, 1], model.cutoff)
     assert torch.isfinite(model(g)["energy"]).all()

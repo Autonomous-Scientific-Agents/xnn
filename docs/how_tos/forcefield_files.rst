@@ -28,7 +28,9 @@ extension, ``oplsaa+`` is their union), ``dreiding`` and ``dreiding/X6`` are
 the two DREIDING nonbond forms, and a dozen published ReaxFF fields live
 under ``reaxff/``. All are copied verbatim from SEAMM (BSD-3-Clause). xnn
 adds ``lopls`` (Siu *et al.* 2012) and ``oplsaa-1996`` (the torsions of the
-original paper), which ``#include`` ``oplsaa.frc`` and override a few rows.
+original paper), which ``#include`` ``oplsaa.frc`` and override a few rows,
+and the electrolyte-water ReaxFF field of Fedkin *et al.* (2019),
+``reaxff/CHOLiNaKCsFClI_Fedkin_2019``.
 
 Every model and reader takes the same *spec*: a variant name, a path to a
 ``.frc`` file, or ``"<path>.frc:<variant>"``.
