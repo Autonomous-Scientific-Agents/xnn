@@ -23,7 +23,8 @@ always uses the newest version of each entry.
 
 ## Vendored from SEAMM (BSD-3-Clause)
 
-`oplsaa.frc` and everything under `reaxff/` are copied verbatim from
+`oplsaa.frc` and the files under `reaxff/` (except the Fedkin field listed
+under "Authored here") are copied verbatim from
 
     https://github.com/molssi-seamm/forcefield_step/tree/main/forcefield_step/data
     commit 764a20139712834a9266dc069f7abda1a4652efa (2025-05-26)
@@ -60,6 +61,8 @@ The scientific provenance of each parameter set is recorded in the
 |---|---|---|
 | `lopls.frc` | `lopls` | L-OPLS, the long-hydrocarbon refit of Siu, Pluhackova & Boeckmann, *JCTC* 8, 1459 (2012), Table 2, layered over `oplsaa` via `#include` |
 | `oplsaa_1996.frc` | `oplsaa-1996` | `oplsaa` with the alkane torsions of the original 1996 paper (Supporting Information Table 7), which reproduce its Table 1 |
+| `reaxff/CHOLiNaKCsFClI_Fedkin_2019.frc` | `reaxff/CHOLiNaKCsFClI_Fedkin_2019` | Li/Na/K/Cs/F/Cl/I electrolytes in water, Fedkin *et al.*, *J. Phys. Chem. A* 123, 2125 (2019): section S4 of the Supporting Information converted with SEAMM, bond energies kept at the source's four decimals |
 
-Both compose with `oplsaa.frc` through `#include local:oplsaa.frc`; the
-`local:` prefix resolves against this directory.
+The two OPLS files compose with `oplsaa.frc` through
+`#include local:oplsaa.frc`; the `local:` prefix resolves against this
+directory.

@@ -85,9 +85,13 @@ identical weights involves:
   about 1e-16 hartree, gradients and virials to about 1e-17, for every
   damping function; the matrix-free D4 regime differs by the reference's
   own Ewald tolerance (about 1e-8 in the charges).
-- **ReaxFF / ReaxFF-nn**: the published equations, cross-checked against
-  LAMMPS ``pair_style reaxff`` (nonbonded terms to about 1e-6 eV, totals to
-  about 0.1 percent from differing bond-list truncation). The authors'
+- **ReaxFF / ReaxFF-nn**: the published equations; with
+  ``conventions="lammps"`` (the default for classical fields), LAMMPS
+  ``pair_style reaxff`` with ``fix qeq/reaxff`` on water, NaCl(aq) and C/H/O
+  structures of up to 1536 atoms: energies to about 3e-10 eV per atom, forces
+  to about 1e-6 eV/Angstrom, charges to 1e-9 e. The vendored
+  ``CHO_cho_2008`` file rounds eight bond energies to three decimals, which
+  moves its energies by about 1e-5 eV per bond. The authors'
   ReaxFF-nn code is AGPL-licensed, so nothing derived from it is distributed
   and none of its code was copied; the shipped tests recompute every term
   from the papers.

@@ -28,7 +28,9 @@ extension, ``oplsaa+`` is their union), ``dreiding`` and ``dreiding/X6`` are
 the two DREIDING nonbond forms, and a dozen published ReaxFF fields live
 under ``reaxff/``. All are copied verbatim from SEAMM (BSD-3-Clause). xnn
 adds ``lopls`` (Siu *et al.* 2012) and ``oplsaa-1996`` (the torsions of the
-original paper), which ``#include`` ``oplsaa.frc`` and override a few rows.
+original paper), which ``#include`` ``oplsaa.frc`` and override a few rows,
+and the electrolyte-water ReaxFF field of Fedkin *et al.* (2019),
+``reaxff/CHOLiNaKCsFClI_Fedkin_2019``.
 
 Every model and reader takes the same *spec*: a variant name, a path to a
 ``.frc`` file, or ``"<path>.frc:<variant>"``.
@@ -83,9 +85,15 @@ Trained parameters go back out in the same format:
 
    reax.export_library().save("ffield.json")      # ReaxFF-nn weights: JSON only
 
-The written file carries the templates. A dihedral ``V0`` constant has no
-column in the format and is dropped (it changes neither forces nor energy
-differences); ReaxFF-nn network weights have no place in it and stay in JSON.
+   from xnn.ffnn.models.ffield import write_ffield
+   write_ffield(reax.export_library(), "ffield.refit")   # classical ReaxFF for LAMMPS
+
+The written ``.frc`` file carries the templates. A dihedral ``V0`` constant
+has no column in the format and is dropped (it changes neither forces nor
+energy differences); ReaxFF-nn network weights have no place in it and stay in
+JSON. ``write_ffield`` writes the ``ffield`` text format of LAMMPS
+``pair_style reaxff``, so a ReaxFF field refit with ``conventions="lammps"``
+(the default for classical fields) runs there unchanged.
 
 The format in brief
 ===================
