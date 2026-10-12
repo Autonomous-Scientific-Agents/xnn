@@ -139,7 +139,7 @@ the MolSSI Driver Interface.
 | Family | Models |
 |---|---|
 | Generic add-ons (`common`) | LES long-range electrostatics (optionally charge-constrained or charge-equilibrated); DFT-D3 (zero, BJ, mzero, op damping) and DFT-D4 dispersion |
-| Graph neural networks (`gnn`) | SchNet, DimeNet, DimeNet++, PaiNN, NequIP, MACE, Allegro, CACE, AIMNet2 |
+| Graph neural networks (`gnn`) | SchNet, DimeNet, DimeNet++, GemNet (-Q, -T, -dQ, -dT), PaiNN, NequIP, MACE, Allegro, CACE, AIMNet2 |
 | Dense neural networks (`dnn`) | ANI (ANI-1, ANI-1x, ANI-1ccx, ANI-2x), PhysNet, HDNNP (generations 1 to 4) |
 | Convolutional neural networks (`cnn`) | 3D steerable-/ conventional- / spherical-CNN |
 | Force field neural networks (`ffnn`) | ReaxFF / ReaxFF-nn, OPLS-AA / L-OPLS, DREIDING / X6 |
@@ -147,7 +147,7 @@ the MolSSI Driver Interface.
 | Semiempirical quantum mechanics neural networks (`sqmnn`) | PM3, PM6, PM6-ORG, PM7 (classics or trainable) |
 
 Each model is checked against its reference code or paper
-(`examples/fidelity_checks/`). SchNet, DimeNet, PaiNN, SpookyNet, NequIP, MACE, Allegro and AIMNet2
+(`examples/fidelity_checks/`). SchNet, DimeNet, GemNet, PaiNN, SpookyNet, NequIP, MACE, Allegro and AIMNet2
 also export to TorchScript / LAMMPS; every model deploys through ASE and the MDI
 engine.
 

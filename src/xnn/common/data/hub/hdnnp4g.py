@@ -8,10 +8,12 @@ forces and Hirshfeld charges from FHI-aims (PBE):
 * ``ag_clusters``: 11013 Ag3+ and Ag3- clusters;
 * ``nacl_clusters``: 5000 Na9Cl8+ and Na8Cl8+ clusters;
 * ``au2_mgo``: 5000 periodic structures of an Au2 dimer on an undoped or an
-  Al-doped MgO(001) slab (110 atoms).
+  Al-doped MgO(001) slab (110 atoms);
+* ``au2_mgo_minima``: the four DFT-optimized ``au2_mgo`` structures, in the order
+  non-wetting doped, non-wetting undoped, wetting doped, wetting undoped.
 
-The data is read from extended XYZ copies in angstrom and eV: the molecules
-from the data repository of the CACE long-range paper (Kim, King, Zhong and
+The data is read from extended XYZ copies in angstrom and eV: the molecules and
+``au2_mgo_minima`` from the data repository of the CACE long-range paper (Kim, King, Zhong and
 Cheng, *Nat. Commun.* 2025; CC BY-NC 4.0), ``au2_mgo`` from the repository of
 the latent Ewald summation paper (Cheng, *npj Comput. Mater.* 2025).
 
@@ -51,6 +53,11 @@ _FILES = {
                  "e5c2290ae3e58b492e8add5e054e4df9"),
                 ("les", "data-benchmark/test-Au-MgO-Al.xyz",
                  "ace9a86f28262db5ef1022ef523d24f9")],
+    "au2_mgo_minima": [("cace", f"fit-4hdnnp-Au2-MgO-Al/dft-optimized-struct/{name}.xyz", md5)
+                       for name, md5 in (("1-doped", "963262419bd96c40bb7fb5b502c39f1b"),
+                                         ("1-undoped", "21302cede5caabae11db3af918797335"),
+                                         ("3-doped", "ab363edde0c10950ff12905e4c7b0474"),
+                                         ("3-undoped", "9ce1bf2ea18ab23ab095c4726ac554ea"))],
 }
 
 _ALIASES = {
@@ -83,8 +90,8 @@ class HDNNP4GBuilder(DatasetBuilder):
         cache_dir : pathlib.Path
             Base cache directory; files are stored under ``cache_dir/"hdnnp4g"``.
         system : str, optional
-            ``carbon_chain``, ``ag_clusters``, ``nacl_clusters`` or ``au2_mgo``
-            (default).
+            ``carbon_chain``, ``ag_clusters``, ``nacl_clusters``, ``au2_mgo``
+            (default) or ``au2_mgo_minima``.
         quiet : bool, optional
             Suppress progress output. Defaults to ``False``.
 
@@ -93,7 +100,7 @@ class HDNNP4GBuilder(DatasetBuilder):
         dict of {str: list of dict} or list of dict
             Structure dicts with ``pos``, ``atomic_numbers``, ``energy``,
             ``forces``, ``charges`` and ``total_charge``; ``cell`` and ``pbc``
-            are periodic for ``au2_mgo`` only.
+            are periodic for ``au2_mgo`` and ``au2_mgo_minima`` only.
 
         Raises
         ------

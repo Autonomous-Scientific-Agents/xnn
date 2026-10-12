@@ -11,7 +11,7 @@ Organized by model family, with everything shared factored into ``common``:
         train       -- Trainer, losses (batch + device aware)
         deploy      -- ASE calculator, LAMMPS/TorchScript export
         cli         -- the `xnn` command
-    gnn/     graph networks: SchNet / DimeNet / PaiNN, and
+    gnn/     graph networks: SchNet / DimeNet / GemNet / PaiNN, and
              NequIP / MACE / Allegro / CACE / AIMNet2 (need e3nn)
     cnn/     volumetric 3D CNNs over voxelized environments (CNN3D, 3D steerable CNN)
     dnn/     dense neural networks (HDNNP / ANI / PhysNet)
@@ -32,7 +32,7 @@ from . import common  # noqa: F401  (data, config, models, train, deploy, cli)
 # methods (sqmnn) and the shared transformer building blocks need no e3nn
 from . import cnn, dnn, ffnn, hybrid, sqmnn, transformer  # noqa: F401
 
-# the GNN family registers SchNet, DimeNet and PaiNN unconditionally and its
+# the GNN family registers SchNet, DimeNet, GemNet and PaiNN unconditionally and its
 # equivariant models (NequIP/MACE/Allegro/CACE/AIMNet2) only when e3nn
 # is available (it warns otherwise, see gnn/models/__init__.py)
 from . import gnn  # noqa: F401

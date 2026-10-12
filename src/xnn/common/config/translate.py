@@ -113,6 +113,27 @@ _KEY_TRANSLATIONS: dict[str, dict[str, str]] = {
         "num_after_skip": "n_after_skip",
         "num_dense_output": "n_output_layers",
     },
+    # the GemNet reference code's spellings (TUM-DAML/gemnet_pytorch); key names
+    # only (triplets_only and envelope_exponent are read by GemNet.from_config)
+    "gemnet": {
+        "emb_size_atom": "n_features",
+        "emb_size_edge": "n_edge_features",
+        "emb_size_trip": "n_triplet_features",
+        "emb_size_quad": "n_quadruplet_features",
+        "emb_size_rbf": "n_rbf_features",
+        "emb_size_cbf": "n_cbf_features",
+        "emb_size_sbf": "n_sbf_features",
+        "emb_size_bil_trip": "n_bilinear_triplet",
+        "emb_size_bil_quad": "n_bilinear_quadruplet",
+        "num_blocks": "n_interactions",
+        "num_radial": "n_rbf",
+        "num_spherical": "n_spherical",
+        "num_before_skip": "n_before_skip",
+        "num_after_skip": "n_after_skip",
+        "num_concat": "n_concat",
+        "num_atom": "n_atom_residual",
+        "scale_file": "scaling_factors",
+    },
     # the PaiNN reference code's spellings (schnetpack); key names only
     "painn": {
         "n_atom_basis": "n_features",

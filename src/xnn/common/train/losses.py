@@ -95,11 +95,32 @@ def _mean(err: Tensor, w: Optional[Tensor]) -> Tensor:
     return (w.reshape(shape) * err).sum() / (w.sum() * per_element)
 
 
+def _count(err: Tensor, w: Optional[Tensor]) -> float:
+    """The weight :func:`_mean` divides by, in units of its first axis.
+
+    Parameters
+    ----------
+    err : Tensor
+        Element-wise errors, as passed to :func:`_mean`.
+    w : Tensor or None
+        Their weights, as passed to :func:`_mean`.
+
+    Returns
+    -------
+    float
+        ``len(err)`` when unweighted, ``w.sum()`` otherwise, so that a mean
+        over several batches is the sum of ``mean * count`` over the sum of
+        ``count``.
+    """
+    return float(err.shape[0]) if w is None else float(w.sum().detach())
+
+
 def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
            energy_weight: float, force_weight: float, stress_weight: float,
            d_e: float, d_f: float, d_s: float,
            dipole_weight: float = 0.0, polarizability_weight: float = 0.0,
-           d_t: float = 0.0, charge_weight: float = 0.0) -> tuple[Tensor, dict[str, float]]:
+           d_t: float = 0.0, charge_weight: float = 0.0,
+           counts: Optional[dict] = None) -> tuple[Tensor, dict[str, float]]:
     """The weighted energy, force, stress, dipole, polarizability and charge
     terms over the structures weighted by ``w``.
 
@@ -111,6 +132,8 @@ def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
         Per-structure weights ``(B,)`` (``None`` = uniform). A zero weight
         drops a structure from every term, so a head's terms are the means
         over its own structures.
+    counts : dict or None, optional
+        Filled, when given, as described in :func:`weighted_loss`.
 
     Returns
     -------
@@ -126,9 +149,12 @@ def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
         if w_e is None or bool(w_e.any()):
             # per-atom energy error -> size-extensive, well-scaled across structures
             n = data.n_atoms.to(pred["energy"].dtype)
-            e_loss = _mean(_residual_sq((pred["energy"] - data.energy) / n, d_e), w_e)
+            err = _residual_sq((pred["energy"] - data.energy) / n, d_e)
+            e_loss = _mean(err, w_e)
             loss = loss + energy_weight * e_loss
             logs["energy_mse"] = float(e_loss.detach())
+            if counts is not None:
+                counts["energy_mse"] = (_count(err, w_e), energy_weight)
 
     if data.forces is not None and force_weight > 0 and "forces" in pred:
         w_f = _masked(w, getattr(data, "forces_mask", None), pred["forces"],
@@ -141,17 +167,23 @@ def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
             a = a.to(pred["forces"].dtype)
             w_atom = a if w_atom is None else w_atom * a
         if w_atom is None or bool(w_atom.any()):
-            f_loss = _mean(_residual_sq(pred["forces"] - data.forces, d_f), w_atom)
+            err = _residual_sq(pred["forces"] - data.forces, d_f)
+            f_loss = _mean(err, w_atom)
             loss = loss + force_weight * f_loss
             logs["force_mse"] = float(f_loss.detach())
+            if counts is not None:
+                counts["force_mse"] = (_count(err, w_atom), force_weight)
 
     if data.stress is not None and stress_weight > 0 and "stress" in pred:
         w_s = _masked(w, getattr(data, "stress_mask", None), pred["stress"],
                       getattr(data, "stress_weight", None))
         if w_s is None or bool(w_s.any()):
-            s_loss = _mean(_residual_sq(pred["stress"] - data.stress, d_s), w_s)
+            err = _residual_sq(pred["stress"] - data.stress, d_s)
+            s_loss = _mean(err, w_s)
             loss = loss + stress_weight * s_loss
             logs["stress_mse"] = float(s_loss.detach())
+            if counts is not None:
+                counts["stress_mse"] = (_count(err, w_s), stress_weight)
 
     # the tensorial labels of molecules (PaiNN, PhysNet, AIMNet2 dipoles):
     # per-structure means over the 3 (dipole) or 9 (polarizability) components
@@ -161,9 +193,12 @@ def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
             continue
         w_t = _masked(w, getattr(data, key + "_mask", None), pred[key])
         if w_t is None or bool(w_t.any()):
-            t_loss = _mean(_residual_sq(pred[key] - target, d_t), w_t)
+            err = _residual_sq(pred[key] - target, d_t)
+            t_loss = _mean(err, w_t)
             loss = loss + weight * t_loss
             logs[key + "_mse"] = float(t_loss.detach())
+            if counts is not None:
+                counts[key + "_mse"] = (_count(err, w_t), weight)
 
     # per-atom partial charges (the charge networks of the 3G / 4G HDNNPs),
     # averaged over the atoms of the labelled structures like the forces
@@ -171,9 +206,12 @@ def _terms(pred: dict[str, Tensor], data: AtomicGraph, w: Optional[Tensor],
         w_q = _masked(w, getattr(data, "charges_mask", None), pred["charges"])
         if w_q is None or bool(w_q.any()):
             w_atom = None if w_q is None else w_q[data.batch]
-            q_loss = _mean(_residual_sq(pred["charges"] - data.charges, d_t), w_atom)
+            err = _residual_sq(pred["charges"] - data.charges, d_t)
+            q_loss = _mean(err, w_atom)
             loss = loss + charge_weight * q_loss
             logs["charge_mse"] = float(q_loss.detach())
+            if counts is not None:
+                counts["charge_mse"] = (_count(err, w_atom), charge_weight)
     return loss, logs
 
 
@@ -189,6 +227,7 @@ def weighted_loss(pred: dict[str, Tensor], data: AtomicGraph,
                   huber_delta_stress: Optional[float] = None,
                   head_weights: Optional[Mapping[int, Sequence[float]]] = None,
                   head_names: Optional[Sequence[str]] = None,
+                  counts: Optional[dict] = None,
                   ) -> tuple[Tensor, dict[str, float]]:
     """Compute a weighted sum of energy, force and stress loss terms.
 
@@ -248,7 +287,19 @@ def weighted_loss(pred: dict[str, Tensor], data: AtomicGraph,
     averaged over the head's own structures (the multi-head replay objective,
     Tompa *et al.* eq. 3), and ``head_weights`` gives a head its own energy,
     force and stress weights (eq. 4). A single-head batch reduces to the plain
-    loss above.
+    loss above; with ``head_names`` given, its logs still carry the head's
+    prefix, so every batch of a multi-head run logs its terms under the same
+    keys.
+
+    **Dataset-level metrics.** Each term is a weighted mean, and a mean over
+    batches of unequal size (or with unequal numbers of labels) is not the
+    mean of the batch means. Pass a dict as ``counts`` to have it filled with
+    ``{key: (count, term_weight)}`` for every term key of ``logs``: the
+    weight the term's mean divides by (structures, atoms or their summed
+    weights) and the term's loss weight. The mean of a term over many batches
+    is then ``sum(logs[key] * count) / sum(count)``, exactly the value one
+    batch holding all the structures would give, and the loss over them is
+    ``sum(term_weight * mean)`` over the keys.
 
     **Huber tails.** With ``huber_delta > 0`` the squared error is replaced by
     a Huber-like function that is quadratic up to ``delta`` and linear beyond,
@@ -297,6 +348,10 @@ def weighted_loss(pred: dict[str, Tensor], data: AtomicGraph,
     head_names : sequence of str, optional
         Head names for the per-head log keys (``"<head>/energy_mse"``);
         indices are used when omitted.
+    counts : dict or None, optional
+        When given, filled with ``{key: (count, term_weight)}`` for every term
+        key of ``logs`` (see *Dataset-level metrics* above). Defaults to
+        ``None``.
 
     Returns
     -------
@@ -316,11 +371,24 @@ def weighted_loss(pred: dict[str, Tensor], data: AtomicGraph,
     weights = (energy_weight, force_weight, stress_weight)
 
     heads = [] if data.head is None else [int(h) for h in torch.unique(data.head).tolist()]
+    def _name(h):
+        return head_names[h] if head_names is not None and h < len(head_names) else str(h)
+
     if len(heads) <= 1:
         w_e, w_f, w_s = (head_weights or {}).get(heads[0], weights) if heads else weights
+        part_counts = {} if counts is not None else None
         loss, logs = _terms(pred, data, data.weight, w_e, w_f, w_s, d_e, d_f, d_s,
                             dipole_weight, polarizability_weight, huber_delta,
-                            charge_weight)
+                            charge_weight, part_counts)
+        if heads and head_names is not None:
+            # one head of a multi-head run: log under its name, like mixed batches
+            name = _name(heads[0])
+            logs = {f"{name}/{k}": v for k, v in logs.items()}
+            logs[f"{name}/loss"] = float(loss.detach())
+            if part_counts is not None:
+                part_counts = {f"{name}/{k}": v for k, v in part_counts.items()}
+        if counts is not None:
+            counts.update(part_counts)
         logs["loss"] = float(loss.detach())
         return loss, logs
 
@@ -330,12 +398,15 @@ def weighted_loss(pred: dict[str, Tensor], data: AtomicGraph,
         mask = (data.head == h).to(pred["energy"].dtype)
         w = mask if data.weight is None else data.weight * mask
         w_e, w_f, w_s = (head_weights or {}).get(h, weights)
+        part_counts = {} if counts is not None else None
         part, part_logs = _terms(pred, data, w, w_e, w_f, w_s, d_e, d_f, d_s,
                                  dipole_weight, polarizability_weight, huber_delta,
-                                 charge_weight)
+                                 charge_weight, part_counts)
         loss = loss + part
-        name = head_names[h] if head_names is not None and h < len(head_names) else str(h)
+        name = _name(h)
         logs.update({f"{name}/{k}": v for k, v in part_logs.items()})
+        if counts is not None:
+            counts.update({f"{name}/{k}": v for k, v in part_counts.items()})
         logs[f"{name}/loss"] = float(part.detach())
     logs["loss"] = float(loss.detach())
     return loss, logs

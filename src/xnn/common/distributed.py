@@ -137,6 +137,34 @@ def all_reduce_sum(values: list[float], device: torch.device) -> list[float]:
     return t.tolist()
 
 
+def merge_dicts(d: dict) -> dict:
+    """Merge a small picklable dict over all ranks (identity outside a distributed run).
+
+    Ranks may hold different keys, e.g. a loss term that only some ranks'
+    batches produced; every rank gets the union, so collectives that follow
+    can iterate the same keys in the same order. On a key held by several
+    ranks the highest rank's value wins.
+
+    Parameters
+    ----------
+    d : dict
+        This rank's entries.
+
+    Returns
+    -------
+    dict
+        The merged dict, identical on every rank.
+    """
+    if not (dist.is_available() and dist.is_initialized()):
+        return dict(d)
+    parts = [None] * dist.get_world_size()
+    dist.all_gather_object(parts, dict(d))
+    merged = {}
+    for part in parts:
+        merged.update(part)
+    return merged
+
+
 def all_gather_cat(t: torch.Tensor, device: torch.device) -> torch.Tensor:
     """Concatenate a flat tensor from every rank, in rank order.
 

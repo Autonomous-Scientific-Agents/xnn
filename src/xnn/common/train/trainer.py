@@ -104,6 +104,50 @@ def _structures(dataset, what: str) -> list[dict]:
                     f"multi-head training, got {type(dataset).__name__}")
 
 
+def _set_epoch(loader, epoch: int) -> None:
+    """Tell the epoch-aware samplers of a loader which epoch begins.
+
+    A ``DistributedSampler`` (``loader.sampler``) or a custom batch sampler
+    (``loader.batch_sampler``) seeds its shuffle from the epoch and repeats
+    the same order every epoch unless told; samplers without ``set_epoch``
+    (the built-in single-process ``RandomSampler`` reshuffles by itself) are
+    left alone.
+
+    Parameters
+    ----------
+    loader : torch.utils.data.DataLoader
+        The loader, or any object exposing ``sampler`` / ``batch_sampler``.
+    epoch : int
+        The zero-based epoch about to start.
+    """
+    told = []
+    for sampler in (getattr(loader, "batch_sampler", None), getattr(loader, "sampler", None)):
+        if hasattr(sampler, "set_epoch") and not any(sampler is t for t in told):
+            sampler.set_epoch(epoch)
+            told.append(sampler)
+
+
+def _summary(metrics: dict) -> str:
+    """Format a metrics dict as ``loss (term values; per-head losses)``.
+
+    Parameters
+    ----------
+    metrics : dict of str to float
+        Dataset-level metrics as returned by ``Trainer._dataset_metrics``.
+
+    Returns
+    -------
+    str
+        For example ``"1.2340e-02 (energy 1.100e-04, force 1.200e-03)"``.
+    """
+    parts = [f"{k[:-4]} {v:.3e}" for k, v in sorted(metrics.items())
+             if k.endswith("_mse") and "/" not in k]
+    heads = [f"{k[:-5]} {v:.3e}" for k, v in sorted(metrics.items())
+             if k.endswith("/loss")]
+    detail = "; ".join(x for x in (", ".join(parts), ", ".join(heads)) if x)
+    return f"{metrics.get('loss', 0):.4e}" + (f" ({detail})" if detail else "")
+
+
 class _EMA:
     """Exponential moving average of a module's parameters, accumulated in float64.
 
@@ -197,6 +241,16 @@ class Trainer:
         relabelled by the pretrained model when ``cfg.data.replay_pseudolabel``
         is set, split by ``val_fraction`` like the training set, and trained
         alongside it. Requires ``model.extra["heads"]``.
+    train_batch_sampler, val_batch_sampler, test_batch_sampler : iterable or None, optional
+        Custom batch samplers (each yields lists of dataset indices) for the
+        training, validation and test loaders, replacing ``cfg.data.batch_size``
+        and the shuffling, e.g. to keep molecules and periodic cells in
+        separate batches of their own sizes. A sampler indexes the dataset as
+        given, so it cannot be combined with a split carved out of
+        ``train_set`` or with a replay set merged into that split. One with a
+        ``set_epoch(epoch)`` method is told each epoch (to reshuffle). In a
+        distributed run the sampler must yield each rank's own share of every
+        batch. Defaults to ``None`` (the built-in loaders).
 
     Attributes
     ----------
@@ -223,8 +277,9 @@ class Trainer:
         ``cfg.optim.ema_decay > 0``; :attr:`eval_module` is what validation,
         testing and the checkpoints use.
     train_loader : torch.utils.data.DataLoader
-        Shuffled loader over the training set. Batch training is simply
-        ``batch_size > 1``; set the batch size to 1 to disable it.
+        Shuffled loader over the training set (or batched by
+        ``train_batch_sampler``). Batch training is simply ``batch_size > 1``;
+        set the batch size to 1 to disable it.
     val_loader : torch.utils.data.DataLoader or None
         Non-shuffled loader over the validation set, or ``None`` if there is
         no validation set.
@@ -240,12 +295,28 @@ class Trainer:
     def __init__(self, cfg: Config, train_set: AtomicDataset,
                  val_set: AtomicDataset | None = None,
                  test_set: AtomicDataset | None = None,
-                 replay_set: AtomicDataset | None = None):
+                 replay_set: AtomicDataset | None = None,
+                 train_batch_sampler=None, val_batch_sampler=None,
+                 test_batch_sampler=None):
         from ..finetune.freeze import freeze_parameters
         from ..finetune.heads import find_multihead, label_head
         from ..finetune.reference import reference_markers
 
         self.cfg = cfg
+        # a batch sampler indexes its dataset as given: refuse the splits and
+        # the replay merge that would renumber it (before any costly setup)
+        carves_val = val_set is None and cfg.data.val_fraction > 0
+        carves_test = test_set is None and cfg.data.test_fraction > 0
+        if train_batch_sampler is not None and (carves_val or carves_test
+                                                or replay_set is not None):
+            raise ValueError(
+                "train_batch_sampler indexes train_set as given: pass val_set and "
+                "test_set explicitly (or set data.val_fraction and data.test_fraction "
+                "to 0) and no replay_set")
+        if val_batch_sampler is not None and (val_set is None or replay_set is not None):
+            raise ValueError("val_batch_sampler needs an explicit val_set and no replay_set")
+        if test_batch_sampler is not None and test_set is None:
+            raise ValueError("test_batch_sampler needs an explicit test_set")
         self.distributed = distributed.is_distributed()
         self.device = self._init_distributed(resolve_device(cfg.device))
         self.rank = distributed.rank()
@@ -296,6 +367,7 @@ class Trainer:
                              "(for example [pt_head, Default])")
 
         self._resolve_reference_energies(base, multi, markers, train_set)
+        self._fit_scaling_factors(base, train_set)
 
         if o.freeze or o.train_only:
             n_train, n_total = freeze_parameters(self.module, o.freeze, o.train_only)
@@ -331,18 +403,31 @@ class Trainer:
                 val_set = replay_val if val_set is None else ConcatDataset([val_set, replay_val])
 
         # batch training is just batch_size > 1; set to 1 to disable.
-        # Distributed runs shard every loader across ranks; the sampler then
-        # owns the shuffling (the two DataLoader options are exclusive).
-        def _loader(ds, shuffle):
-            sampler = (DistributedSampler(ds, shuffle=shuffle, seed=cfg.seed)
-                       if self.distributed else None)
+        # Distributed runs shard every loader across ranks. Training uses
+        # DistributedSampler, which owns the shuffling (the two DataLoader
+        # options are exclusive) and pads the shards to equal length so every
+        # rank takes the same number of synchronised steps. Evaluation has no
+        # gradient sync, so its shards are disjoint and unpadded: no structure
+        # is counted twice in the validation and test metrics.
+        def _loader(ds, shuffle, batch_sampler=None):
+            if batch_sampler is not None:
+                return DataLoader(ds, batch_sampler=batch_sampler, collate_fn=collate,
+                                  num_workers=cfg.data.num_workers)
+            if not self.distributed:
+                sampler = None
+            elif shuffle:
+                sampler = DistributedSampler(ds, shuffle=True, seed=cfg.seed)
+            else:
+                sampler = distributed.shard_indices(len(ds))
             return DataLoader(ds, batch_size=cfg.data.batch_size,
                               shuffle=shuffle and sampler is None,
                               sampler=sampler, collate_fn=collate,
                               num_workers=cfg.data.num_workers)
-        self.train_loader = _loader(train_set, shuffle=True)
-        self.val_loader = _loader(val_set, False) if val_set is not None else None
-        self.test_loader = _loader(test_set, False) if test_set is not None else None
+        self.train_loader = _loader(train_set, True, train_batch_sampler)
+        self.val_loader = (_loader(val_set, False, val_batch_sampler)
+                           if val_set is not None else None)
+        self.test_loader = (_loader(test_set, False, test_batch_sampler)
+                            if test_set is not None else None)
 
         self._params = [p for p in self.model.parameters() if p.requires_grad]
         if not self._params:
@@ -471,6 +556,26 @@ class Trainer:
             return train, val
         return ds, None
 
+    def _fit_scaling_factors(self, base, train_set) -> None:
+        """Fit the activation scaling factors of a model that has unfitted ones (GemNet).
+
+        25 batches of 32 training structures, as in the GemNet reference code;
+        no labels are used. ``model.extra["fit_scaling"] = False`` skips it.
+        """
+        targets = [m for m in base.modules()
+                   if callable(getattr(m, "fit_scaling_factors", None))
+                   and not bool(getattr(m, "scaling_fitted", True))]
+        if not targets or not bool((self.cfg.model.extra or {}).get("fit_scaling", True)):
+            return
+        loader = DataLoader(train_set, batch_size=32, shuffle=True, collate_fn=collate,
+                            generator=torch.Generator().manual_seed(self.cfg.seed))
+        batches = [graph.to(self.device) for _, graph in zip(range(25), loader)]
+        for module in targets:
+            fitted = module.fit_scaling_factors(batches)
+            if self.is_main:
+                print(f"fitted {len(fitted)} scaling factors on "
+                      f"{sum(g.num_graphs for g in batches)} structures")
+
     def _resolve_reference_energies(self, base, multi, markers, train_set) -> None:
         """Estimate the reference energies the config marked, set them, record them."""
         if not markers:
@@ -566,12 +671,13 @@ class Trainer:
 
         Returns
         -------
-        dict of str to float
+        tuple of (dict of str to float, dict)
             The scalar loss logs for this batch, as returned by
             :func:`weighted_loss` (e.g. ``"loss"`` plus any of
             ``"energy_mse"``, ``"force_mse"``, ``"stress_mse"``,
             ``"dipole_mse"``, ``"polarizability_mse"``, ``"charge_mse"``, per head
-            for a multi-head batch).
+            in a multi-head run), and the ``counts`` of its terms that
+            :meth:`_dataset_metrics` accumulates.
         """
         data = data.to(self.device)
         o = self.cfg.optim
@@ -580,6 +686,7 @@ class Trainer:
         # gradient sync must not be armed.
         model = self.model if train else self.eval_module
         pred = model(data)
+        counts = {}
         loss, logs = weighted_loss(
             pred, data, o.energy_weight, o.force_weight, o.stress_weight,
             dipole_weight=o.dipole_weight,
@@ -589,7 +696,8 @@ class Trainer:
             huber_delta_energy=o.huber_delta_energy,
             huber_delta_forces=o.huber_delta_forces,
             huber_delta_stress=o.huber_delta_stress,
-            head_weights=self._head_weights or None, head_names=self.heads)
+            head_weights=self._head_weights or None, head_names=self.heads,
+            counts=counts)
         if train:
             self.opt.zero_grad()
             loss.backward()
@@ -598,7 +706,7 @@ class Trainer:
             self.opt.step()
             if self.ema is not None:
                 self.ema.update_parameters(self.module)
-        return logs
+        return logs, counts
 
     def fit(self):
         """Run the full training loop over ``cfg.optim.epochs`` epochs.
@@ -609,8 +717,14 @@ class Trainer:
         output directory. The scheduler is stepped every epoch: a
         ``ReduceLROnPlateau`` scheduler is stepped with the current loss, while
         any other scheduler is stepped without arguments. A per-epoch summary
-        is printed. After the final epoch the model is saved to ``last.pt``
-        and, if a test loader exists, evaluated once on the test set (with the
+        is printed. The training loader's sampler is told the epoch before
+        each pass (``set_epoch``) whenever it has that method, in every launch
+        mode, so a ``DistributedSampler`` or a custom batch sampler reshuffles
+        each epoch; the built-in single-process loader reshuffles by itself.
+        Every reported metric is a dataset-level mean (see
+        :meth:`_dataset_metrics`). After the final epoch the model is saved
+        to ``last.pt`` and, if a test loader exists, evaluated once on the
+        test set (with the
         final-epoch weights; to test the best checkpoint instead, load
         ``best.pt`` into ``self.model`` and call :meth:`evaluate`).
 
@@ -618,22 +732,22 @@ class Trainer:
         -------
         dict
             Final metrics: ``{"train": ..., "val": ..., "test": ...}``, each a
-            dict of averaged losses (empty when that split does not exist).
+            dict of dataset-level losses (empty when that split does not exist).
+            The training metrics are accumulated during the epoch, while the
+            weights change.
         """
         best = float("inf")
         tr, va = {}, {}
         for epoch in range(self.cfg.optim.epochs):
-            if self.distributed:
-                # reseed the sampler so each epoch shuffles differently
-                self.train_loader.sampler.set_epoch(epoch)
+            _set_epoch(self.train_loader, epoch)
             self.model.train()
-            tr = self._avg(self._step(d, True) for d in self.train_loader)
+            tr = self._dataset_metrics(self._step(d, True) for d in self.train_loader)
 
             va = {}
             if self.val_loader is not None:
                 self.model.eval()
                 # forces need grad even at eval -> no torch.no_grad()
-                va = self._avg(self._step(d, False) for d in self.val_loader)
+                va = self._dataset_metrics(self._step(d, False) for d in self.val_loader)
                 metric = va.get("loss", tr["loss"])
                 if metric < best:
                     best = metric
@@ -652,12 +766,17 @@ class Trainer:
         if self.test_loader is not None:
             te = self.evaluate()
             if self.is_main:
-                print(f"test loss {te.get('loss', 0):.4e}")
+                print(f"test loss {_summary(te)}")
         distributed.destroy_process_group(self._owns_pg)
         return {"train": tr, "val": va, "test": te}
 
     def evaluate(self, loader=None):
         """Evaluate the current model over a data loader without training.
+
+        In a distributed run each rank scores its shard and the metrics are
+        combined across ranks. After :meth:`fit` has ended the process group
+        (the trainer owned it), every rank scores the whole set of the loader
+        instead, so the metrics are still those of the whole set.
 
         Parameters
         ----------
@@ -667,74 +786,104 @@ class Trainer:
         Returns
         -------
         dict of str to float
-            Averaged losses over the loader (as in :meth:`_step`), or an empty
-            dict when there is no loader.
+            Dataset-level losses over the loader (see
+            :meth:`_dataset_metrics`), or an empty dict when there is no
+            loader.
         """
         loader = self.test_loader if loader is None else loader
         if loader is None:
             return {}
+        if self.distributed and not (torch.distributed.is_available()
+                                     and torch.distributed.is_initialized()):
+            # fit() has ended the process group, so the ranks can no longer
+            # combine their shards: every rank scores the whole set instead
+            loader = DataLoader(loader.dataset, batch_size=self.cfg.data.batch_size,
+                                collate_fn=collate, num_workers=self.cfg.data.num_workers)
         self.model.eval()
         # forces need grad even at eval -> no torch.no_grad()
-        return self._avg(self._step(d, False) for d in loader)
+        return self._dataset_metrics(self._step(d, False) for d in loader)
 
-    def _avg(self, logs_iter):
-        """Average a sequence of per-batch log dictionaries.
+    def _dataset_metrics(self, steps):
+        """Accumulate per-batch losses into means over the whole dataset.
 
-        In a distributed run the per-rank sums and batch counts are further
-        summed over all ranks with an all-reduce, so every rank returns the
-        same global averages -- the best-checkpoint decision and the plateau
-        scheduler then stay in lockstep across ranks.
+        Each loss term of a batch is a weighted mean over its structures or
+        atoms, so the batches are combined by those weights, not counted
+        equally: a term's dataset value is ``sum(mean * count) / sum(count)``
+        with the counts of :func:`weighted_loss`, which equals the term over
+        one batch holding every structure. A smaller last batch, or a term
+        that only some batches carry (stress of the periodic structures,
+        a head's own structures), is then weighted by what it holds. The
+        ``"loss"`` is rebuilt from those means and the term weights, and so
+        is the ``"<head>/loss"`` of each head.
+
+        In a distributed run the per-rank sums are all-reduced over the union
+        of every rank's keys, so every rank returns the same global values
+        and the best-checkpoint decision and the plateau scheduler stay in
+        lockstep across ranks.
 
         Parameters
         ----------
-        logs_iter : iterable of dict of str to float
-            An iterable yielding per-batch log dictionaries (as returned by
-            :meth:`_step`). Keys need not be present in every dictionary.
+        steps : iterable of tuple
+            The ``(logs, counts)`` pairs returned by :meth:`_step`.
 
         Returns
         -------
         dict of str to float
-            Each key mapped to the mean of its values across the batches (and
-            across ranks when distributed). An empty iterable yields an empty
-            dictionary (division guarded so an empty iterable does not raise).
+            Each term key mapped to its dataset-level mean, plus ``"loss"``
+            (and the per-head losses). An empty iterable on every rank yields
+            an empty dictionary.
         """
-        agg, n = {}, 0
-        for logs in logs_iter:
+        sums, totals, weights, n = {}, {}, {}, 0
+        for logs, counts in steps:
             n += 1
-            for k, v in logs.items():
-                agg[k] = agg.get(k, 0.0) + v
+            for k, (count, weight) in counts.items():
+                sums[k] = sums.get(k, 0.0) + logs[k] * count
+                totals[k] = totals.get(k, 0.0) + count
+                weights[k] = weight
         if self.distributed:
-            keys = sorted(agg)
-            n, *sums = distributed.all_reduce_sum(
-                [float(n)] + [agg[k] for k in keys], self.device)
-            agg = dict(zip(keys, sums))
-        return {k: v / max(n, 1) for k, v in agg.items()}
+            weights = distributed.merge_dicts(weights)
+            keys = sorted(weights)
+            n, *values = distributed.all_reduce_sum(
+                [float(n)] + [sums.get(k, 0.0) for k in keys]
+                + [totals.get(k, 0.0) for k in keys], self.device)
+            sums = dict(zip(keys, values[:len(keys)]))
+            totals = dict(zip(keys, values[len(keys):]))
+        if n == 0:
+            return {}
+        out = {k: sums[k] / totals[k] for k in sorted(sums) if totals[k] > 0}
+        loss, heads = 0.0, {}
+        for k, v in list(out.items()):
+            loss += weights[k] * v
+            if "/" in k:
+                head = k.rsplit("/", 1)[0]
+                heads[head] = heads.get(head, 0.0) + weights[k] * v
+        out.update({f"{h}/loss": v for h, v in heads.items()})
+        out["loss"] = loss
+        return out
 
     @staticmethod
     def _log(epoch, tr, va):
-        """Print a one-line summary of an epoch's train and validation loss.
+        """Print a one-line summary of an epoch's train and validation metrics.
 
         Parameters
         ----------
         epoch : int
             Zero-based epoch index.
         tr : dict of str to float
-            Averaged training logs; its ``"loss"`` entry is reported, plus the
-            per-head losses of a multi-head run.
+            Dataset-level training metrics; the loss is reported with its
+            terms (``energy``, ``force``, ...) and the per-head losses of a
+            multi-head run.
         va : dict of str to float
-            Averaged validation logs. When non-empty, its ``"loss"`` entry is
-            appended to the message; when empty, only training loss is shown.
+            Dataset-level validation metrics, reported the same way when
+            non-empty.
 
         Returns
         -------
         None
         """
-        msg = f"epoch {epoch:4d} | train loss {tr.get('loss', 0):.4e}"
+        msg = f"epoch {epoch:4d} | train loss {_summary(tr)}"
         if va:
-            msg += f" | val loss {va.get('loss', 0):.4e}"
-        heads = [k[:-5] for k in sorted(tr) if k.endswith("/loss")]
-        if heads:
-            msg += " | " + " ".join(f"{h} {tr[h + '/loss']:.3e}" for h in heads)
+            msg += f" | val loss {_summary(va)}"
         print(msg)
 
     def save(self, path: str):
