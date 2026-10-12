@@ -85,9 +85,15 @@ Trained parameters go back out in the same format:
 
    reax.export_library().save("ffield.json")      # ReaxFF-nn weights: JSON only
 
-The written file carries the templates. A dihedral ``V0`` constant has no
-column in the format and is dropped (it changes neither forces nor energy
-differences); ReaxFF-nn network weights have no place in it and stay in JSON.
+   from xnn.ffnn.models.ffield import write_ffield
+   write_ffield(reax.export_library(), "ffield.refit")   # classical ReaxFF for LAMMPS
+
+The written ``.frc`` file carries the templates. A dihedral ``V0`` constant
+has no column in the format and is dropped (it changes neither forces nor
+energy differences); ReaxFF-nn network weights have no place in it and stay in
+JSON. ``write_ffield`` writes the ``ffield`` text format of LAMMPS
+``pair_style reaxff``, so a ReaxFF field refit with ``conventions="lammps"``
+(the default for classical fields) runs there unchanged.
 
 The format in brief
 ===================

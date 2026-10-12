@@ -25,7 +25,7 @@ from xnn.common.models import ForceStressOutput, build_model
 from xnn.ffnn.models import ReaxFF, read_ffield, template_library
 from xnn.ffnn.models.ffield import (default_pair_cutoff, dedup_torsion_types,
                                      lammps_pair_parameters, resolve_torsion,
-                                     to_forcefield)
+                                     to_forcefield, write_ffield)
 from xnn.ffnn.models.reaxff import (KCAL_TO_EV, KE, LAMMPS_C_ELE,
                                      LAMMPS_EV_TO_KCAL, LAMMPS_PI,
                                      LAMMPS_QEQ_KE, LAMMPS_THB_CUT,
@@ -484,6 +484,70 @@ def test_fedkin_field_ships():
     assert model.conventions == "lammps"
     assert model.hb_flag.tolist() == [1, 2, 0, 2]
     assert model.vdw_type == 1
+
+
+def _parse_ffield(text):
+    """Blocks of a written ffield: general values and per-block token rows."""
+    lines = [line.split("!")[0].split() for line in text.splitlines()]
+    k = 1
+    n = int(lines[k][0])
+    general = [float(t[0]) for t in lines[k + 1:k + 1 + n]]
+    k += 1 + n
+    n = int(lines[k][0])
+    k += 4
+    atoms = [lines[k + 4 * i:k + 4 * i + 4] for i in range(n)]
+    k += 4 * n
+    n = int(lines[k][0])
+    k += 2
+    bonds = [lines[k + 2 * i:k + 2 * i + 2] for i in range(n)]
+    k += 2 * n
+    blocks = {}
+    for name in ("offd", "angles", "torsions", "hbonds"):
+        n = int(lines[k][0])
+        blocks[name] = lines[k + 1:k + 1 + n]
+        k += 1 + n
+    return general, atoms, bonds, blocks
+
+
+def test_write_ffield_layout():
+    """The written ffield has LAMMPS's block counts, columns and values."""
+    lib = read_ffield("CHO_cho_2008")
+    general, atoms, bonds, blocks = _parse_ffield(write_ffield(lib))
+    assert len(general) == 39
+    assert general[0] == 50.0 and general[5] == 70.0      # boc1, kc2
+    assert [a[0][0] for a in atoms] == lib.spec
+    assert all(len(a[0]) == 9 and all(len(r) == 8 for r in a[1:]) for a in atoms)
+    assert len(bonds) == 6 and all(len(b[0]) == 10 and len(b[1]) == 8 for b in bonds)
+    assert [len(blocks[k]) for k in ("offd", "angles", "torsions", "hbonds")] \
+        == [len(lib.offd), len(lib.angs), 26, 1]
+    assert all(len(r) == 11 for r in blocks["torsions"])
+    assert sum(r[0] == "0" and r[3] == "0" for r in blocks["torsions"]) == 5
+    index = {sym: str(i + 1) for i, sym in enumerate(lib.spec)}
+    ch = next(b for b in bonds if b[0][:2] == [index["C"], index["H"]])
+    assert float(ch[0][2]) == lib.p["Desi_C-H"]
+    o = atoms[lib.spec.index("O")]
+    assert float(o[1][7]) == 2.0                            # hydrogen-bond flag
+    assert blocks["hbonds"][0][:3] == [index["O"], index["H"], index["O"]]
+    assert float(blocks["hbonds"][0][4]) == lib.p["Dehb_O-H-O"]
+    assert "70.0000" in write_ffield(lib, digits=4)
+    with pytest.raises(ValueError):
+        write_ffield(template_library(["C", "H"], nn=True))
+
+
+def test_export_library_keeps_bonds_and_energies(tmp_path):
+    """A model's exported library lists only its bonds and gives its energies."""
+    model = ReaxFF("CHOLiNaKCsFClI_Fedkin_2019", species=["H", "O", "Na", "Cl"])
+    pos, z = _water_dimer()
+    g = _graph(pos, z, model.cutoff)
+    lib = model.export_library()
+    assert len(lib.bonds) == 10                 # every H/O/Na/Cl pair has a row
+    path = to_forcefield(lib, name="reaxff/refit").write(tmp_path / "refit.frc")
+    e1 = float(model(g)["energy"][0])
+    e2 = float(ReaxFF(str(path))(g)["energy"][0])
+    assert abs(e1 - e2) < 1e-10
+    general, atoms, bonds, _ = _parse_ffield(write_ffield(lib, tmp_path / "ffield"))
+    assert len(atoms) == 4 and len(bonds) == 10
+    assert general[11:13] == [0.0, model.cutoff]       # the nonbonded taper
 
 
 # invariances, forces, batching

@@ -575,6 +575,10 @@ class ReaxFF(InteratomicPotential):
         self.botol = 0.01 * p["cutoff"]
         self.atol = p["acut"]
         self.hbtol = p["hbtol"]
+        # carried through export_library for written files
+        self.heat_increment = dict(lib.heat_increment)
+        self.library_unused = dict(lib.unused)
+        self.library_name = lib.name
 
         # species -> model index; Z -> model index
         z_to_index = torch.full((len(CHEMICAL_SYMBOLS),), -1, dtype=torch.long)
@@ -2212,6 +2216,7 @@ class ReaxFF(InteratomicPotential):
             p[name] = float(P[name]) * unit(name)
         p["tripflag"] = 2.0 if self.triple_all else 0.0
         p["cutoff"] = self.botol / 0.01
+        p["swa"], p["swb"] = 0.0, self.cutoff          # the nonbonded taper
         p["acut"] = self.atol
         p["hbtol"] = self.hbtol
         for name in _P_SPECIES:
@@ -2230,7 +2235,8 @@ class ReaxFF(InteratomicPotential):
             for j in range(i, S):
                 b = spec[j]
                 bd = f"{a}-{b}"
-                bonds.append(bd)
+                if self.has_bond[i, j]:
+                    bonds.append(bd)
                 if a != b:
                     offd.append(bd)
                 for name in _P_PAIR:
@@ -2252,8 +2258,9 @@ class ReaxFF(InteratomicPotential):
             for j, b in enumerate(spec):
                 for k, c in enumerate(spec):
                     for l, d in enumerate(spec):
-                        if (l, k, j, i) < (i, j, k, l):
-                            continue          # keep one spelling per torsion
+                        if (l, k, j, i) < (i, j, k, l) \
+                                or not self.tor_listed[i, j, k, l]:
+                            continue          # one spelling, parameterized only
                         tor = f"{a}-{b}-{c}-{d}"
                         torp.append(tor)
                         for name in P_TORSION:
@@ -2327,7 +2334,9 @@ class ReaxFF(InteratomicPotential):
             energy_function=self.energy_function,
             message_function=self.message_function, vdw_function=0,
             bo_layer=self.bo_layer, mf_layer=self.mf_layer,
-            be_layer=self.be_layer, vdw_layer=None, rcut=rcut, rcuta=rcuta)
+            be_layer=self.be_layer, vdw_layer=None, rcut=rcut, rcuta=rcuta,
+            heat_increment=dict(self.heat_increment),
+            unused=dict(self.library_unused), name=self.library_name)
 
     # construction
     @classmethod
