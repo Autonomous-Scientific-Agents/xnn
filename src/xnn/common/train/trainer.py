@@ -37,10 +37,12 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import ConcatDataset, DataLoader, DistributedSampler, random_split
 
 from .. import distributed
-from ..config import Config
+from ..config import Config, TrainerConfig
 from ..data import AtomicDataset, collate
 from ..models import ForceStressOutput
 from ..models.registry import prepare_model
+from .callbacks import EarlyStopping, ModelCheckpoint, ProgressBar, monitored_value
+from .loggers import build_loggers
 from .losses import weighted_loss
 
 
@@ -127,27 +129,6 @@ def _set_epoch(loader, epoch: int) -> None:
             told.append(sampler)
 
 
-def _summary(metrics: dict) -> str:
-    """Format a metrics dict as ``loss (term values; per-head losses)``.
-
-    Parameters
-    ----------
-    metrics : dict of str to float
-        Dataset-level metrics as returned by ``Trainer._dataset_metrics``.
-
-    Returns
-    -------
-    str
-        For example ``"1.2340e-02 (energy 1.100e-04, force 1.200e-03)"``.
-    """
-    parts = [f"{k[:-4]} {v:.3e}" for k, v in sorted(metrics.items())
-             if k.endswith("_mse") and "/" not in k]
-    heads = [f"{k[:-5]} {v:.3e}" for k, v in sorted(metrics.items())
-             if k.endswith("/loss")]
-    detail = "; ".join(x for x in (", ".join(parts), ", ".join(heads)) if x)
-    return f"{metrics.get('loss', 0):.4e}" + (f" ({detail})" if detail else "")
-
-
 class _EMA:
     """Exponential moving average of a module's parameters, accumulated in float64.
 
@@ -184,6 +165,56 @@ class _EMA:
             shadow.mul_(d).add_(cur.detach().to(torch.float64), alpha=1.0 - d)
             avg.copy_(shadow.to(avg.dtype))
         self.n_averaged += 1
+
+
+#: Properties scored by the error metrics (``trainer.metrics``).
+_METRIC_TARGETS = ["energy", "forces", "stress", "dipole", "polarizability", "charges"]
+
+
+class _Sums:
+    """Running sums of per-batch ``(logs, counts)`` pairs (see ``Trainer._dataset_metrics``)."""
+
+    def __init__(self):
+        self.sums, self.totals, self.weights, self.n = {}, {}, {}, 0
+
+    def add(self, logs: dict, counts: dict) -> "_Sums":
+        """Fold in one batch; an RMSE (weight ``None``) is summed as its square."""
+        self.n += 1
+        for k, (count, weight) in counts.items():
+            v = logs[k] ** 2 if weight is None and k.endswith("_rmse") else logs[k]
+            self.sums[k] = self.sums.get(k, 0.0) + v * count
+            self.totals[k] = self.totals.get(k, 0.0) + count
+            self.weights[k] = weight
+        return self
+
+
+def _finish(acc: _Sums, is_distributed: bool, device) -> dict:
+    """Dataset-level values of accumulated sums, combined over the ranks when distributed."""
+    sums, totals, weights, n = acc.sums, acc.totals, acc.weights, acc.n
+    if is_distributed:
+        weights = distributed.merge_dicts(weights)
+        keys = sorted(weights)
+        n, *values = distributed.all_reduce_sum(
+            [float(n)] + [sums.get(k, 0.0) for k in keys]
+            + [totals.get(k, 0.0) for k in keys], device)
+        sums = dict(zip(keys, values[:len(keys)]))
+        totals = dict(zip(keys, values[len(keys):]))
+    if n == 0:
+        return {}
+    out = {k: sums[k] / totals[k] for k in sorted(sums) if totals[k] > 0}
+    loss, heads = 0.0, {}
+    for k, v in list(out.items()):
+        if weights[k] is None:          # an error metric, not a loss term
+            if k.endswith("_rmse"):
+                out[k] = v ** 0.5
+            continue
+        loss += weights[k] * v
+        if "/" in k:
+            head = k.rsplit("/", 1)[0]
+            heads[head] = heads.get(head, 0.0) + weights[k] * v
+    out.update({f"{h}/loss": v for h, v in heads.items()})
+    out["loss"] = loss
+    return out
 
 
 class Trainer:
@@ -251,6 +282,16 @@ class Trainer:
         ``set_epoch(epoch)`` method is told each epoch (to reshuffle). In a
         distributed run the sampler must yield each rank's own share of every
         batch. Defaults to ``None`` (the built-in loaders).
+    logger : Logger, str, list or False, optional
+        Where the metrics go: a :class:`~xnn.common.train.loggers.Logger`, a
+        name (``"console"``, ``"csv"``, ``"tensorboard"``) or a list of
+        either; ``False`` or ``[]`` logs nothing. ``None`` (the default) uses
+        ``cfg.trainer.loggers``. Only rank 0 logs.
+    callbacks : list of Callback or None, optional
+        Hooks into the loop (:mod:`~xnn.common.train.callbacks`). A
+        :class:`~xnn.common.train.callbacks.ModelCheckpoint` and, as
+        ``cfg.trainer`` asks, an ``EarlyStopping`` and a ``ProgressBar`` are
+        added unless one of the same type is given.
 
     Attributes
     ----------
@@ -290,6 +331,19 @@ class Trainer:
         The optimizer over the trainable parameters.
     sched : torch.optim.lr_scheduler._LRScheduler or ReduceLROnPlateau or None
         The learning-rate scheduler, or ``None`` when disabled.
+    loggers : list of Logger
+        The loggers :meth:`log_metrics` writes to.
+    callbacks : list of Callback
+        The callbacks, in the order they run.
+    monitor : str
+        The monitored value (``cfg.trainer.monitor``, with ``val/`` read as
+        ``train/`` when there is no validation set).
+    mode : str
+        ``"min"`` or ``"max"``.
+    global_step : int
+        Optimizer steps taken so far; the ``step`` of every logged value.
+    should_stop : bool
+        Set by a callback to end training after the current epoch.
     """
 
     def __init__(self, cfg: Config, train_set: AtomicDataset,
@@ -297,12 +351,16 @@ class Trainer:
                  test_set: AtomicDataset | None = None,
                  replay_set: AtomicDataset | None = None,
                  train_batch_sampler=None, val_batch_sampler=None,
-                 test_batch_sampler=None):
+                 test_batch_sampler=None, logger=None, callbacks=None):
         from ..finetune.freeze import freeze_parameters
         from ..finetune.heads import find_multihead, label_head
         from ..finetune.reference import reference_markers
 
         self.cfg = cfg
+        # a config unpickled from an older checkpoint has no trainer section
+        t = getattr(cfg, "trainer", None) or TrainerConfig()
+        t.validate()
+        self.tcfg = t
         # a batch sampler indexes its dataset as given: refuse the splits and
         # the replay merge that would renumber it (before any costly setup)
         carves_val = val_set is None and cfg.data.val_fraction > 0
@@ -444,6 +502,25 @@ class Trainer:
                 raise ValueError(f"optim.ema_decay must lie in (0, 1), got {o.ema_decay}")
             self.ema = _EMA(self.module, o.ema_decay)
         os.makedirs(cfg.output_dir, exist_ok=True)
+        self.global_step = 0
+        self.should_stop = False
+        self.loggers = build_loggers(t.loggers if logger is None else logger)
+        for lg in self.loggers:
+            lg.setup(cfg.output_dir)
+        self.monitor, self.mode = t.monitor, t.mode
+        if self.val_loader is None and self.monitor.startswith("val/"):
+            self.monitor = "train/" + self.monitor[len("val/"):]
+        self.callbacks = list(callbacks or [])
+        defaults = [ModelCheckpoint(every_n_epochs=t.save_every_n_epochs)]
+        if t.early_stopping_patience > 0 or t.early_stopping_threshold is not None:
+            defaults.append(EarlyStopping(patience=t.early_stopping_patience,
+                                          min_delta=t.early_stopping_min_delta,
+                                          stopping_threshold=t.early_stopping_threshold))
+        if t.progress_bar:
+            defaults.append(ProgressBar())
+        for cb in defaults:
+            if not any(isinstance(c, type(cb)) for c in self.callbacks):
+                self.callbacks.append(cb)
 
     def _init_distributed(self, dev: torch.device) -> torch.device:
         """Join the process group of a distributed launcher, if there is one.
@@ -646,7 +723,8 @@ class Trainer:
             return torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.opt, T_max=self.cfg.optim.epochs)
         if name == "plateau":
-            return torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, patience=10)
+            return torch.optim.lr_scheduler.ReduceLROnPlateau(self.opt, mode=self.tcfg.mode,
+                                                              patience=10)
         return None
 
     def _step(self, data, train: bool):
@@ -676,7 +754,8 @@ class Trainer:
             :func:`weighted_loss` (e.g. ``"loss"`` plus any of
             ``"energy_mse"``, ``"force_mse"``, ``"stress_mse"``,
             ``"dipole_mse"``, ``"polarizability_mse"``, ``"charge_mse"``, per head
-            in a multi-head run), and the ``counts`` of its terms that
+            in a multi-head run, plus the error metrics such as
+            ``"forces_mae"``), and the ``counts`` of its terms that
             :meth:`_dataset_metrics` accumulates.
         """
         data = data.to(self.device)
@@ -698,77 +777,176 @@ class Trainer:
             huber_delta_stress=o.huber_delta_stress,
             head_weights=self._head_weights or None, head_names=self.heads,
             counts=counts)
+        if self.tcfg.metrics:
+            self._error_metrics(pred, data, logs, counts)
         if train:
+            if self.distributed:
+                # an output without labels in this batch (a dipole head on a
+                # batch without dipoles) still joins the graph with weight 0,
+                # so DDP sees every parameter used; values and gradients are
+                # unchanged
+                loss = loss + sum(0.0 * v.sum() for k, v in pred.items()
+                                  if k not in ("forces", "stress", "virials")
+                                  and torch.is_tensor(v) and v.requires_grad)
             self.opt.zero_grad()
             loss.backward()
             if o.clip_grad > 0:
                 torch.nn.utils.clip_grad_norm_(self._params, o.clip_grad)
             self.opt.step()
+            self.global_step += 1
             if self.ema is not None:
                 self.ema.update_parameters(self.module)
         return logs, counts
 
-    def fit(self):
-        """Run the full training loop over ``cfg.optim.epochs`` epochs.
+    def _error_metrics(self, pred, data, logs: dict, counts: dict) -> None:
+        """Add the MAE / RMSE of every labelled property of a batch to ``logs`` and ``counts``.
 
-        For each epoch the model is trained over the whole training loader and,
-        if a validation loader exists, evaluated over it. The best validation
-        loss seen so far is tracked and its model saved to ``best.pt`` in the
-        output directory. The scheduler is stepped every epoch: a
-        ``ReduceLROnPlateau`` scheduler is stepped with the current loss, while
-        any other scheduler is stepped without arguments. A per-epoch summary
-        is printed. The training loader's sampler is told the epoch before
-        each pass (``set_epoch``) whenever it has that method, in every launch
-        mode, so a ``DistributedSampler`` or a custom batch sampler reshuffles
-        each epoch; the built-in single-process loader reshuffles by itself.
-        Every reported metric is a dataset-level mean (see
-        :meth:`_dataset_metrics`). After the final epoch the model is saved
-        to ``last.pt`` and, if a test loader exists, evaluated once on the
-        test set (with the
-        final-epoch weights; to test the best checkpoint instead, load
-        ``best.pt`` into ``self.model`` and call :meth:`evaluate`).
+        The pairs are those the benchmark scores
+        (:func:`~xnn.common.benchmark.metrics.prediction_pairs`: energy per
+        atom, every component of forces, stress, dipole and polarizability,
+        charges per atom, zero-weight labels left out), unweighted. Their
+        counts carry the weight ``None``, so they stay out of the loss.
+        """
+        from ..benchmark.metrics import prediction_pairs
+        for target, (p, r) in prediction_pairs(pred, data, _METRIC_TARGETS).items():
+            n = p.numel()
+            if n == 0:
+                continue
+            d = (p - r).detach().double()
+            if "mae" in self.tcfg.metrics:
+                logs[f"{target}_mae"] = float(d.abs().mean())
+                counts[f"{target}_mae"] = (float(n), None)
+            if "rmse" in self.tcfg.metrics:
+                logs[f"{target}_rmse"] = float(d.pow(2).mean().sqrt())
+                counts[f"{target}_rmse"] = (float(n), None)
+
+    def _callback(self, hook: str, *args) -> None:
+        """Run ``hook`` of every callback."""
+        for cb in self.callbacks:
+            getattr(cb, hook)(self, *args)
+
+    def _train_epoch(self) -> dict:
+        """One training pass over the loader; returns its dataset-level metrics.
+
+        With ``cfg.trainer.log_every_n_steps > 0`` the training values are
+        logged every n steps as ``train_step/<key>``: the step's batch or,
+        with ``step_average: running``, the epoch so far, combined over the
+        ranks like the epoch values.
+        """
+        t = self.tcfg
+        epoch = _Sums()
+        for i, data in enumerate(self.train_loader):
+            logs, counts = self._step(data, True)
+            epoch.add(logs, counts)
+            self._callback("on_train_batch_end", logs, i)
+            if t.log_every_n_steps > 0 and self.global_step % t.log_every_n_steps == 0:
+                acc = epoch if t.step_average == "running" else _Sums().add(logs, counts)
+                values = _finish(acc, self.distributed, self.device)
+                self.log_metrics({f"train_step/{k}": v for k, v in values.items()})
+        return _finish(epoch, self.distributed, self.device)
+
+    def log_metrics(self, metrics: dict, step: int | None = None) -> None:
+        """Send ``metrics`` to every logger (rank 0 only).
+
+        Parameters
+        ----------
+        metrics : dict of str to float
+            Metric names mapped to values.
+        step : int or None, optional
+            The step to record them at; defaults to :attr:`global_step`.
+        """
+        if not self.is_main:
+            return
+        step = self.global_step if step is None else step
+        for lg in self.loggers:
+            lg.log_metrics(metrics, step)
+
+    def fit(self):
+        """Run the training loop over ``cfg.optim.epochs`` epochs (or until a callback stops it).
+
+        Each epoch trains over the whole training loader, validates every
+        ``cfg.trainer.val_every_n_epochs`` epochs (and after the last), steps
+        the scheduler (a ``ReduceLROnPlateau`` with the monitored value, on
+        the epochs that have it) and runs the callbacks: the default
+        :class:`~xnn.common.train.callbacks.ModelCheckpoint` writes
+        ``best.pt`` whenever the monitored value improves and ``last.pt``
+        after the last epoch. The epoch metrics go to the loggers every
+        ``cfg.trainer.log_every_n_epochs`` epochs (``epoch``, ``lr``,
+        ``train/<key>``, ``val/<key>``), and the test metrics, evaluated once
+        with the final weights, as ``test/<key>``. Every value is a
+        dataset-level mean (see :meth:`_dataset_metrics`). The training
+        loader's sampler is told the epoch before each pass (``set_epoch``)
+        whenever it has that method, in every launch mode. To test the best
+        checkpoint instead, load ``best.pt`` and call :meth:`evaluate`.
 
         Returns
         -------
         dict
             Final metrics: ``{"train": ..., "val": ..., "test": ...}``, each a
-            dict of dataset-level losses (empty when that split does not exist).
+            dict of dataset-level values (empty when that split does not exist).
             The training metrics are accumulated during the epoch, while the
             weights change.
         """
-        best = float("inf")
+        if self.is_main and self.loggers:
+            from ..models.hub.checkpoint import _dataclass_dict
+            params = _dataclass_dict(self.cfg)   # every field, defaults included
+            for lg in self.loggers:
+                lg.log_hyperparams(params)
+        status = "failed"
+        try:
+            out = self._fit()
+            status = "success"
+            return out
+        finally:
+            if self.is_main:
+                for lg in self.loggers:
+                    lg.finalize(status)
+
+    def _fit(self):
+        """The epoch loop of :meth:`fit`."""
+        t = self.tcfg
+        epochs = self.cfg.optim.epochs
+        self.should_stop = False
+        self._callback("on_fit_start")
         tr, va = {}, {}
-        for epoch in range(self.cfg.optim.epochs):
+        for epoch in range(epochs):
+            last = epoch == epochs - 1
             _set_epoch(self.train_loader, epoch)
+            lr = self.opt.param_groups[0]["lr"]
+            self._callback("on_train_epoch_start", epoch)
             self.model.train()
-            tr = self._dataset_metrics(self._step(d, True) for d in self.train_loader)
+            tr = self._train_epoch()
 
             va = {}
-            if self.val_loader is not None:
+            if self.val_loader is not None and ((epoch + 1) % t.val_every_n_epochs == 0 or last):
                 self.model.eval()
                 # forces need grad even at eval -> no torch.no_grad()
                 va = self._dataset_metrics(self._step(d, False) for d in self.val_loader)
-                metric = va.get("loss", tr["loss"])
-                if metric < best:
-                    best = metric
-                    self.save(os.path.join(self.cfg.output_dir, "best.pt"))
+            metrics = {"epoch": epoch, "lr": lr, **{f"train/{k}": v for k, v in tr.items()},
+                       **{f"val/{k}": v for k, v in va.items()}}
 
             if isinstance(self.sched, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                self.sched.step(va.get("loss", tr["loss"]))
+                value = monitored_value(metrics, self.monitor)
+                if value is not None:
+                    self.sched.step(value)
             elif self.sched is not None:
                 self.sched.step()
+            self._callback("on_epoch_end", epoch, metrics)
 
-            if self.is_main:
-                self._log(epoch, tr, va)
-        self.save(os.path.join(self.cfg.output_dir, "last.pt"))
+            if (epoch + 1) % t.log_every_n_epochs == 0 or last or self.should_stop:
+                self.log_metrics(metrics)
+            if self.should_stop:
+                break
+        self._callback("on_train_end")
 
         te = {}
         if self.test_loader is not None:
             te = self.evaluate()
-            if self.is_main:
-                print(f"test loss {_summary(te)}")
+            self.log_metrics({f"test/{k}": v for k, v in te.items()})
         distributed.destroy_process_group(self._owns_pg)
-        return {"train": tr, "val": va, "test": te}
+        results = {"train": tr, "val": va, "test": te}
+        self._callback("on_fit_end", results)
+        return results
 
     def evaluate(self, loader=None):
         """Evaluate the current model over a data loader without training.
@@ -814,7 +992,8 @@ class Trainer:
         that only some batches carry (stress of the periodic structures,
         a head's own structures), is then weighted by what it holds. The
         ``"loss"`` is rebuilt from those means and the term weights, and so
-        is the ``"<head>/loss"`` of each head.
+        is the ``"<head>/loss"`` of each head. The error metrics are pooled
+        the same way over every scored value (an RMSE through its square).
 
         In a distributed run the per-rank sums are all-reduced over the union
         of every rank's keys, so every rank returns the same global values
@@ -833,58 +1012,10 @@ class Trainer:
             (and the per-head losses). An empty iterable on every rank yields
             an empty dictionary.
         """
-        sums, totals, weights, n = {}, {}, {}, 0
+        acc = _Sums()
         for logs, counts in steps:
-            n += 1
-            for k, (count, weight) in counts.items():
-                sums[k] = sums.get(k, 0.0) + logs[k] * count
-                totals[k] = totals.get(k, 0.0) + count
-                weights[k] = weight
-        if self.distributed:
-            weights = distributed.merge_dicts(weights)
-            keys = sorted(weights)
-            n, *values = distributed.all_reduce_sum(
-                [float(n)] + [sums.get(k, 0.0) for k in keys]
-                + [totals.get(k, 0.0) for k in keys], self.device)
-            sums = dict(zip(keys, values[:len(keys)]))
-            totals = dict(zip(keys, values[len(keys):]))
-        if n == 0:
-            return {}
-        out = {k: sums[k] / totals[k] for k in sorted(sums) if totals[k] > 0}
-        loss, heads = 0.0, {}
-        for k, v in list(out.items()):
-            loss += weights[k] * v
-            if "/" in k:
-                head = k.rsplit("/", 1)[0]
-                heads[head] = heads.get(head, 0.0) + weights[k] * v
-        out.update({f"{h}/loss": v for h, v in heads.items()})
-        out["loss"] = loss
-        return out
-
-    @staticmethod
-    def _log(epoch, tr, va):
-        """Print a one-line summary of an epoch's train and validation metrics.
-
-        Parameters
-        ----------
-        epoch : int
-            Zero-based epoch index.
-        tr : dict of str to float
-            Dataset-level training metrics; the loss is reported with its
-            terms (``energy``, ``force``, ...) and the per-head losses of a
-            multi-head run.
-        va : dict of str to float
-            Dataset-level validation metrics, reported the same way when
-            non-empty.
-
-        Returns
-        -------
-        None
-        """
-        msg = f"epoch {epoch:4d} | train loss {_summary(tr)}"
-        if va:
-            msg += f" | val loss {_summary(va)}"
-        print(msg)
+            acc.add(logs, counts)
+        return _finish(acc, self.distributed, getattr(self, "device", None))
 
     def save(self, path: str):
         """Serialize the model state dict and configuration to disk.
