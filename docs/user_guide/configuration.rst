@@ -64,13 +64,28 @@ defaults, as YAML:
      freeze: []                 # parameter-name patterns to freeze
      train_only: []             # patterns of the only parameters to train
 
+   trainer:
+     loggers: [console]         # any of console / csv / tensorboard
+     log_every_n_epochs: 1
+     log_every_n_steps: 0       # > 0 also logs training values every n steps
+     step_average: batch        # step values: batch / running (the epoch so far)
+     metrics: [mae, rmse]       # error metrics besides the loss terms
+     monitor: val/loss          # picks best.pt, drives plateau and early stopping
+     mode: min                  # min / max
+     val_every_n_epochs: 1
+     save_every_n_epochs: 0     # > 0 also keeps epoch_<n>.pt
+     early_stopping_patience: 0 # validations without improvement; 0 = off
+     early_stopping_min_delta: 0.0
+     early_stopping_threshold: null
+     progress_bar: false
+
    device: auto                 # auto / cpu / cuda / cuda:0
    seed: 1234
    output_dir: runs/exp
    subtracted_dispersion: null  # what was subtracted from the labels, added back on deployment
 
 The model options are described in :ref:`models`, the fine-tuning keys in
-:ref:`howto-finetune`, the loss options in :ref:`training` and
+:ref:`howto-finetune`, the loss, metric, checkpoint and logging options in :ref:`training` and
 ``subtracted_dispersion`` in :ref:`deployment`.
 
 Frontends
