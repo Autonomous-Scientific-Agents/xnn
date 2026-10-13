@@ -17,7 +17,7 @@ import torch
 pytest.importorskip("e3nn")
 
 from xnn.common.config import from_dict  # noqa: E402
-from xnn.common.data import structure_to_graph  # noqa: E402
+from xnn.common.data import collate, structure_to_graph  # noqa: E402
 from xnn.common.models import ForceStressOutput, build_model  # noqa: E402
 from xnn.common.models.ops import structure_sum  # noqa: E402
 
@@ -74,6 +74,20 @@ def test_energy_totals_are_float64_for_a_float32_model():
     assert out["node_energy"].dtype == torch.float32
     assert out["energy"].dtype == torch.float64
     assert abs(float(out["energy"]) - float(out["node_energy"].double().sum())) < 1e-9
+
+
+def test_energy_labels_stay_float64_under_a_float32_default():
+    """An energy label keeps float64 through structure_to_graph and collate, like the predicted totals."""
+    assert torch.get_default_dtype() == torch.float32
+    e = -406_123.456789
+    pos = [[0.0, 0.0, 0.0], [0.9, 0.0, 0.0]]
+    g = structure_to_graph({"pos": pos, "atomic_numbers": [1, 1], "energy": e}, 3.0)
+    assert g.pos.dtype == torch.float32
+    assert g.energy.dtype == torch.float64 and float(g.energy) == e
+    batch = collate([g, structure_to_graph({"pos": pos, "atomic_numbers": [1, 1]}, 3.0)])
+    assert batch.energy.dtype == torch.float64 and float(batch.energy[0]) == e
+    assert batch.energy_mask.tolist() == [True, False]
+    assert abs(float(torch.tensor(e, dtype=torch.float32)) - e) > 1e-3   # what a float32 label loses
 
 
 def test_float64_geometry_removes_the_coordinate_size_error():

@@ -62,6 +62,8 @@ def structure_to_graph(
     AtomicGraph
         A single-structure graph (``batch`` all zeros, ``n_atoms`` of length
         one), with optional target fields populated when present in ``s``.
+        Floating-point fields take the default dtype, except ``energy``, which
+        is always float64.
     """
     def t(x, dtype=torch.get_default_dtype()):
         """Coerce ``x`` to a tensor, leaving existing tensors untouched.
@@ -105,7 +107,10 @@ def structure_to_graph(
         n_atoms=torch.tensor([n], dtype=torch.long, device=device),
         cell=cell[None] if cell is not None else None,
         pbc=t(pbc)[None] if pbc is not None else None,
-        energy=t([s["energy"]]).reshape(1) if s.get("energy") is not None else None,
+        # a total energy stays float64 whatever the default dtype, like the
+        # predicted totals (structure_sum); float32 rounds large totals
+        energy=(t(torch.as_tensor(s["energy"], dtype=torch.float64)).reshape(1)
+                if s.get("energy") is not None else None),
         forces=t(s["forces"]) if s.get("forces") is not None else None,
         stress=t(s["stress"]).reshape(1, 3, 3) if s.get("stress") is not None else None,
         dipole=t(dipole).reshape(1, 3) if dipole is not None else None,
@@ -361,7 +366,7 @@ def collate(graphs: list[AtomicGraph]) -> AtomicGraph:
                 pbcs.append(torch.zeros((b, 3), dtype=torch.bool, device=device))
         if has_e:
             energies.append(g.energy if g.energy is not None
-                            else torch.zeros(b, dtype=dtype, device=device))
+                            else torch.zeros(b, dtype=torch.float64, device=device))
             e_masks.append(label_mask(g, g.energy, g.energy_mask))
         if has_f:
             forces.append(g.forces if g.forces is not None else torch.zeros_like(g.pos))

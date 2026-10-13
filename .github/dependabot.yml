@@ -1,10 +1,12 @@
 # Dependabot: keep the uv lockfile and the workflow actions current.
 # Security advisories open pull requests as soon as they are published;
-# routine version updates are grouped into one weekly pull request each.
+# routine version updates are grouped into one weekly pull request each,
+# opened against the dev branch.
 version: 2
 updates:
   - package-ecosystem: "uv"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:
@@ -16,6 +18,7 @@ updates:
       - dependency-name: "torch"
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     groups:
