@@ -51,10 +51,10 @@ def _lookup_from(species: Sequence[int], values: Sequence[float]) -> Tensor:
     Returns
     -------
     torch.Tensor
-        A tensor of length :data:`MAX_Z` (default dtype), zero everywhere
-        except at the given atomic numbers.
+        A float64 tensor of length :data:`MAX_Z` (like the energy labels and
+        totals), zero everywhere except at the given atomic numbers.
     """
-    out = torch.zeros(MAX_Z, dtype=torch.get_default_dtype())
+    out = torch.zeros(MAX_Z, dtype=torch.float64)
     for z, v in zip(species, values):
         out[int(z)] = float(v)
     return out
@@ -89,8 +89,8 @@ def fit_atomic_energies(structures: Sequence[dict]) -> tuple[list[int], list[flo
 
     Solves ``C @ E0 ~= E_total`` where ``C[i, j]`` is the count of species ``j``
     in structure ``i`` -- the standard way to estimate E0s when they are not
-    supplied (MACE's ``average`` scheme). Structures without an energy, or
-    with a zero ``weight`` or ``energy_weight``, are skipped.
+    supplied (MACE's ``average`` scheme), in float64. Structures without an
+    energy, or with a zero ``weight`` or ``energy_weight``, are skipped.
 
     Parameters
     ----------
@@ -114,8 +114,8 @@ def fit_atomic_energies(structures: Sequence[dict]) -> tuple[list[int], list[flo
             "energies to fit E0s from")
     species = sorted({int(z) for s in rows for z in s["atomic_numbers"]})
     col = {z: j for j, z in enumerate(species)}
-    counts = torch.zeros(len(rows), len(species), dtype=torch.get_default_dtype())
-    energy = torch.zeros(len(rows), dtype=torch.get_default_dtype())
+    counts = torch.zeros(len(rows), len(species), dtype=torch.float64)
+    energy = torch.zeros(len(rows), dtype=torch.float64)
     for i, s in enumerate(rows):
         for z in s["atomic_numbers"]:
             counts[i, col[int(z)]] += 1.0
