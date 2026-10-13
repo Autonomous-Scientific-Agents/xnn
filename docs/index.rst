@@ -7,24 +7,29 @@ xnn
 Machine-Learning Interatomic Potentials in PyTorch
 ==================================================
 **xnn** is a library of machine-learning interatomic potentials (MLIPs) for
-molecular and periodic systems. 
+molecules and materials. 
 
 The *x* in **xnn** stands for the architecture family: graph neural networks
 (``gnn``), dense neural networks (``dnn``), convolutional neural networks on
 voxel grids (``cnn``), classical force field neural networks (``ffnn``),
-semiempirical quantum chemistry (``sqmnn``) and hybrid models (``hybrid``).
-Every model is implemented using the same PyTorch ``nn.Module`` interface. Thus, one data object, one trainer and one deployment
-path serve all model families.
+semiempirical quantum mechanics (``sqmnn``) and hybrid models (``hybrid``).
+Every model is implemented using the same PyTorch ``nn.Module`` interface. Thus,
+one data object, one trainer and one deployment path serve all model families.
+
+Why xnn?
+========
 
 xnn offers several benefits out-of-the-box:
 
 - **Faithful implementations.** Each model reproduces its reference code or
-  paper to round-off, verified block by block (:ref:`fidelity`).
+  paper to float32 and float64 round-off errors, verified block by block
+  (:ref:`fidelity`).
 - **One pipeline.** Shared data object, config schema, trainer and
   deployment to ASE, LAMMPS and the MolSSI Driver Interface.
-- **Pre-trained and benchmark data in one line.** ``from_pretrained()``
-  loads the MACE and AIMNet2 foundation models and your own checkpoints;
-  ``load_dataset()`` downloads and converts standard datasets.
+- **Pre-trained and benchmark data in one line.** ``from_pretrained()`` loads
+  the MACE and AIMNet2 foundation models and your own checkpoints;
+  ``load_dataset()`` downloads and converts standard datasets into ML-ready
+  formats.
 - **Fine-tuning, benchmarking and multi-GPU training** from a config file
   and the ``xnn`` command.
 - **Physics add-ons for any model.** Latent Ewald long-range electrostatics
@@ -146,14 +151,14 @@ Models at a glance
    * - Add-ons for any model (``common``)
      - LES long-range electrostatics, DFT-D3 and DFT-D4 dispersion
 
-Each model matches its reference code or paper to round-off
-(:ref:`fidelity`); the MACE and AIMNet2 foundation models load through the
-hub. Every model trains, evaluates and runs under ASE. SchNet, DimeNet, GemNet, PaiNN, SpookyNet,
-NequIP, MACE, Allegro and AIMNet2 also export to TorchScript for LAMMPS, and any
-checkpoint serves as an MDI engine (:ref:`deployment`).
+Each model matches its reference code or paper to round-off (:ref:`fidelity`);
+the MACE and AIMNet2 foundation models load through the hub. Every model trains,
+evaluates and runs under ASE deployment interface. SchNet, DimeNet, GemNet,
+PaiNN, SpookyNet, NequIP, MACE, Allegro and AIMNet2 also export to TorchScript
+for LAMMPS, and any checkpoint can also serve as an MDI engine (:ref:`deployment`).
 
-xnn is developed by `The Molecular Sciences Software Institute (MolSSI)
-<https://molssi.org>`_. Visit the `GitHub repository
+xnn is developed by Mohammad Mostafanejad at `The Molecular Sciences Software
+Institute (MolSSI) <https://molssi.org>`_. Visit the `GitHub repository
 <https://github.com/molssi-ai/xnn>`_ for the latest updates.
 
 .. toctree::
