@@ -234,6 +234,7 @@ def test_custom_metric_registration_via_decorator():
 # atomization / interaction energy
 def test_e0_lookup_from_dict():
     e0 = build_e0_lookup({1: -13.6, 8: -2042.0})
+    assert e0.dtype == torch.float64
     assert e0[1] == pytest.approx(-13.6)
     assert e0[8] == pytest.approx(-2042.0)
     assert e0[6] == 0.0            # unspecified elements stay zero
@@ -274,8 +275,7 @@ def test_fit_atomic_energies_recovers_known_e0s():
     species, values = fit_atomic_energies(structs)
     assert species == [1, 6, 8]
     for z, v in zip(species, values):
-        # float32 lstsq on ~2000-magnitude E0s -> ~1e-4 relative precision
-        assert v == pytest.approx(true[z], rel=1e-3)
+        assert v == pytest.approx(true[z], rel=1e-12, abs=1e-9)
 
 
 def test_dataset_structures_reads_atomicdataset(tmp_path):
