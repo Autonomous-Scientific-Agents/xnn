@@ -37,6 +37,7 @@ xnn offers several benefits out-of-the-box:
 - **Fast paths.** Fused GPU kernels for the expensive blocks, switched on
   per run without changing the model.
 
+
 .. grid:: 1 1 2 2
 
    .. grid-item-card:: Getting Started
