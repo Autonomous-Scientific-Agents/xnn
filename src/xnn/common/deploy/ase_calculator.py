@@ -163,7 +163,9 @@ class XNNCalculator(Calculator):
         periodic, is converted from the model's ``3 x 3`` tensor to ASE's
         Voigt 6-vector ordering ``[xx, yy, zz, yz, xz, xy]``. A model that
         predicts partial charges (PhysNet, BAMBOO, AIMNet2) also fills
-        ``"charges"`` and ``"dipole"`` (in the model's units). The net charge and spin
+        ``"charges"`` and ``"dipole"`` (in the model's units); so does an
+        LES model from its ``les_charges`` and, for molecules,
+        ``les_dipole`` (e and e Angstrom). The net charge and spin
         multiplicity of the structure are read from ``atoms.info`` (keys
         ``"charge"`` / ``"total_charge"`` and ``"spin_multiplicity"`` /
         ``"multiplicity"``), as :func:`~xnn.common.data.atoms_to_structure`
@@ -220,5 +222,9 @@ class XNNCalculator(Calculator):
                 [s[0, 0], s[1, 1], s[2, 2], s[1, 2], s[0, 2], s[0, 1]])
         if "charges" in out:
             self.results["charges"] = out["charges"].detach().cpu().numpy()
+        elif "les_charges" in out:
+            self.results["charges"] = out["les_charges"].detach().cpu().numpy()
         if "dipole" in out:
             self.results["dipole"] = out["dipole"][0].detach().cpu().numpy()
+        elif "les_dipole" in out and not atoms.pbc.any():
+            self.results["dipole"] = out["les_dipole"][0].detach().cpu().numpy()

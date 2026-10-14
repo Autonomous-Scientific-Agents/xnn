@@ -47,7 +47,9 @@ The dispersion wrapper also widens the neighbor list (its cutoffs default to the
 upstream 60 / 40 / 30 / 25 bohr): the export bakes in the wrapper's cutoff and
 hands the core model only the edges within the core's own radius, exactly as
 the eager wrapper does. The total charge of the system is fixed at export
-time (``total_charge``, default neutral), since neither tensor ABI carries it.
+time (``total_charge``, default neutral), since neither tensor ABI carries it;
+the LES head reads it for its net-charge constraint and charge solve, whose
+fragment charges come from the ion table alone (no label at deployment).
 
 Core ABIs
 ---------
@@ -73,8 +75,11 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
+from ..models.charge_solve import bonded_fragments, charge_energy, solve_charges
 from ..models.fast import deactivate as deactivate_fast_paths
+from ..models.les import LATENT_CHARGE_PER_E
 from ..models.ops import cell_volume
 
 
@@ -204,31 +209,39 @@ class _NoLongRange(nn.Module):
     """Null long-range head for models exported without LES.
 
     Present so :class:`TorchScriptPotential` has one code path; returns a zero
-    per-atom energy and an empty latent-charge tensor.
+    per-atom energy and empty latent-charge, charge and dipole tensors.
     """
 
     def forward(self, features: Tensor, atomic_numbers: Tensor, pos: Tensor,
                 cell: Tensor, pbc: Tensor, edge_index: Tensor,
-                edge_vec: Tensor) -> Tuple[Tensor, Tensor]:
-        """Return ``(zeros(N), empty(N, 0))`` with the dtype and device of ``pos``."""
+                edge_vec: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Return ``(zeros(N), empty(N, 0), empty(0), empty(0))`` with the
+        dtype and device of ``pos``."""
         n = pos.shape[0]
         return (torch.zeros(n, dtype=pos.dtype, device=pos.device),
-                torch.zeros((n, 0), dtype=pos.dtype, device=pos.device))
+                torch.zeros((n, 0), dtype=pos.dtype, device=pos.device),
+                torch.zeros(0, dtype=pos.dtype, device=pos.device),
+                torch.zeros(0, dtype=pos.dtype, device=pos.device))
 
 
 class _LatentEwaldHead(nn.Module):
     """Scriptable single-structure view of a trained :class:`LatentEwald`.
 
     Holds the *trained* submodules directly (``q_net``, the optional parallel
-    ``q_linear`` and the :class:`~xnn.common.models.les.EwaldSummation`), so
-    the deployed long-range energy is computed by the same code as training --
-    only the batched, ``AtomicGraph``-shaped entry point is replaced by a
-    single-structure one.
+    ``q_linear``, the charge-weight and hardness layers and the
+    :class:`~xnn.common.models.les.EwaldSummation`), so the deployed
+    long-range energy is computed by the same code as training -- only the
+    batched, ``AtomicGraph``-shaped entry point is replaced by a
+    single-structure one. The net-charge constraint, the charge solve (with
+    fragments from the ion table), the particle-mesh sum and the
+    ``les_charges`` / ``les_dipole`` outputs carry over.
 
     Parameters
     ----------
     les : xnn.common.models.les.LatentEwald
         The trained wrapper to take the long-range head from.
+    total_charge : float, optional
+        Net charge of the deployed system in e, by default 0.
 
     Attributes
     ----------
@@ -244,36 +257,76 @@ class _LatentEwaldHead(nn.Module):
     """
 
     use_linear: bool
+    constrain_charge: bool
+    use_charge_weight: bool
+    charge_solve: bool
+    use_hardness_table: bool
+    fragments: bool
+    charge_channel: int
+    bond_factor: float
+    total_charge: float
+    latent_unit: float
+    dipole_origin: str
 
-    def __init__(self, les):
+    def __init__(self, les, total_charge: float = 0.0):
         super().__init__()
         self.q_net = les.q_net
         self.use_linear = les.q_linear is not None
-        if les.q_linear is not None:
-            self.q_linear = les.q_linear
-        else:
-            # placeholder: TorchScript needs the attribute to have a concrete
-            # module type, but use_linear gates every call to it
-            self.q_linear = nn.Linear(1, 1, bias=False)
+        # placeholders: TorchScript needs every attribute to have a concrete
+        # module type, but the flags gate every call to them
+        self.q_linear = les.q_linear if les.q_linear is not None else nn.Linear(1, 1, bias=False)
         self.ewald = les.ewald
+        self.constrain_charge = bool(les.constrain_charge)
+        self.charge_channel = int(les.charge_channel)
+        self.use_charge_weight = les.charge_weight is not None
+        self.charge_weight = (les.charge_weight if les.charge_weight is not None
+                              else nn.Linear(1, 1))
+        self.charge_solve = bool(les.charge_solve)
+        self.use_hardness_table = les.hardness_table is not None
+        self.hardness_table = (les.hardness_table if les.hardness_table is not None
+                               else nn.Embedding(1, 1))
+        self.hardness_net = (les.hardness_net if les.hardness_net is not None
+                             else nn.Linear(1, 1))
+        self.fragments = bool(les.fragments)
+        self.bond_factor = float(les.bond_factor)
+        if self.fragments:
+            radii, ions = les.covalent_radii.clone(), les.ion_charges.clone()
+        else:
+            radii, ions = torch.zeros(119), torch.zeros(119)
+        self.register_buffer("covalent_radii", radii, persistent=False)
+        self.register_buffer("ion_charges", ions, persistent=False)
+        self.register_buffer("masses", les.masses.clone(), persistent=False)
+        self.total_charge = float(total_charge)
+        self.latent_unit = float(LATENT_CHARGE_PER_E)
+        self.dipole_origin = str(les.dipole_origin)
+
+    def hardness_of(self, features: Tensor, atomic_numbers: Tensor) -> Tensor:
+        """The hardness ``J_i > 0`` of every atom, ``(N,)``, in latent units."""
+        if self.use_hardness_table:
+            raw = self.hardness_table(atomic_numbers).squeeze(1)
+        else:
+            raw = self.hardness_net(features).squeeze(1)
+        return F.softplus(raw)
 
     def forward(self, features: Tensor, atomic_numbers: Tensor, pos: Tensor,
                 cell: Tensor, pbc: Tensor, edge_index: Tensor,
-                edge_vec: Tensor) -> Tuple[Tensor, Tensor]:
-        """Long-range energy (spread over the atoms) and latent charges.
+                edge_vec: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Long-range energy (spread over the atoms), latent charges, charges and dipole.
 
-        Selects the reciprocal-space sum for a periodic structure and the
-        real-space direct sum otherwise, using the same test as
-        :meth:`~xnn.common.models.les.EwaldSummation.forward`. The energy is
-        divided evenly over the atoms, as :class:`LatentEwald` does, so the
-        per-atom energies still sum to the total.
+        Selects the reciprocal-space sum (or the particle-mesh sum) for a
+        periodic structure and the real-space direct sum otherwise, using the
+        same test as :meth:`~xnn.common.models.les.EwaldSummation.forward`.
+        The energy, including the charge-solve term ``chi.q + 1/2 J q^2``
+        when present, is divided evenly over the atoms, as
+        :class:`LatentEwald` does, so the per-atom energies still sum to the
+        total.
 
         Parameters
         ----------
         features : Tensor
             Invariant per-atom features, shape ``(N, feature_dim)``.
         atomic_numbers : Tensor
-            Per-atom atomic numbers, shape ``(N,)`` (unused).
+            Per-atom atomic numbers, shape ``(N,)``.
         pos : Tensor
             Cartesian positions, shape ``(N, 3)``.
         cell : Tensor
@@ -281,27 +334,79 @@ class _LatentEwaldHead(nn.Module):
         pbc : Tensor
             Boolean periodicity flags, shape ``(3,)``.
         edge_index, edge_vec : Tensor
-            The neighbor list (unused; LES needs no cutoff).
+            The neighbor list (read by the fragment search only).
 
         Returns
         -------
         node_energy : Tensor
             Per-atom share of the long-range energy, shape ``(N,)``.
-        charges : Tensor
+        latent_charges : Tensor
             Latent charges ``q``, shape ``(N, n_channels)``.
+        charges : Tensor
+            The charge channel in e, shape ``(N,)``.
+        dipole : Tensor
+            Its dipole moment in e Angstrom about the ``dipole_origin``,
+            shape ``(3,)``; zero for a periodic structure.
         """
         q = self.q_net(features)
         if self.use_linear:
             q = q + self.q_linear(features)
+        n = pos.shape[0]
+        target_q = self.total_charge * self.latent_unit
+        channel = torch.tensor([self.charge_channel], device=q.device)
+        if self.constrain_charge:
+            target = torch.zeros(q.shape[1], dtype=q.dtype, device=q.device)
+            target = target.index_fill(0, channel, target_q)
+            residual = q.sum(0) - target
+            if self.use_charge_weight:
+                w = F.softplus(self.charge_weight(features))                 # (N, 1)
+                q = q - w * (residual / w.sum()).unsqueeze(0)
+            else:
+                q = q - (residual / float(n)).unsqueeze(0)
         periodic = (bool(pbc.any())
                     and bool(cell.diagonal().abs().sum() > 1e-6))
+        node_energy = torch.zeros(n, dtype=pos.dtype, device=pos.device)
+        if self.charge_solve:
+            chi = q[:, self.charge_channel]
+            hardness = self.hardness_of(features, atomic_numbers)
+            gamma = self.ewald.coulomb_matrix(pos, cell if periodic else None)
+            frag: Optional[Tensor] = None
+            target_t = torch.full((1,), target_q, dtype=q.dtype, device=q.device)
+            if self.fragments:
+                frag = bonded_fragments(atomic_numbers, edge_index, edge_vec,
+                                        self.covalent_radii.to(pos.dtype),
+                                        self.ion_charges.to(pos.dtype), self.bond_factor)
+                n_frag = int(frag.max()) + 1
+                ions = self.ion_charges.to(q.dtype)[atomic_numbers]
+                targets = torch.zeros(n_frag, dtype=q.dtype, device=q.device).index_add(0, frag, ions)
+                if bool((targets.sum() - self.total_charge).abs() > 1e-6):
+                    raise ValueError("the formal ion charges of the fragments do not add up "
+                                     "to the total_charge fixed at export")
+                target_t = targets * self.latent_unit
+            solved, _ = solve_charges(chi, hardness, gamma, target_t, frag)
+            q = q.index_copy(1, channel, solved.unsqueeze(1))
+            node_energy = node_energy + charge_energy(chi, hardness, solved)
         if periodic:
-            energy = self.ewald.reciprocal(pos, q, cell)
+            if self.ewald.method == "pme":
+                energy = self.ewald.reciprocal_pme(pos, q, cell)
+            else:
+                energy = self.ewald.reciprocal(pos, q, cell)
         else:
-            energy = self.ewald.realspace(pos, q)
-        n_atoms = float(pos.shape[0])
-        return energy / n_atoms + torch.zeros(pos.shape[0], dtype=pos.dtype,
-                                              device=pos.device), q
+            energy = self.ewald.realspace_single(pos, q)
+        node_energy = node_energy + energy / float(n)
+        charges = q[:, self.charge_channel] / self.latent_unit
+        if periodic:
+            dipole = torch.zeros(3, dtype=pos.dtype, device=pos.device)
+        else:
+            if self.dipole_origin == "com":
+                m = self.masses[atomic_numbers].to(pos.dtype).unsqueeze(-1)
+                center = (m * pos).sum(0) / m.sum()
+            elif self.dipole_origin == "centroid":
+                center = pos.mean(0)
+            else:
+                center = torch.zeros(3, dtype=pos.dtype, device=pos.device)
+            dipole = (charges.unsqueeze(-1) * (pos - center.unsqueeze(0))).sum(0)
+        return node_energy, q, charges, dipole
 
 
 class _NoDispersion(nn.Module):
@@ -456,7 +561,7 @@ def split_wrappers(model: nn.Module, total_charge: float = 0.0):
         :class:`~xnn.common.models.les.LatentEwald` and/or
         :class:`~xnn.common.models.d4.D4Dispersion` (any nesting order).
     total_charge : float, optional
-        Net charge handed to the D4 head, by default 0.
+        Net charge handed to the D4 and LES heads, by default 0.
 
     Returns
     -------
@@ -483,7 +588,7 @@ def split_wrappers(model: nn.Module, total_charge: float = 0.0):
     dispersion: nn.Module = _NoDispersion()
     while True:
         if isinstance(core, LatentEwald):
-            long_range = _LatentEwaldHead(core)
+            long_range = _LatentEwaldHead(core, total_charge)
             core = core.model
         elif isinstance(core, DispersionCorrection):
             dispersion = _DispersionHead(core.term, total_charge)
@@ -524,8 +629,9 @@ class TorchScriptPotential(nn.Module):
         For a D4-wrapped model this is the wrapper's (widened) cutoff; the core
         receives only the edges within its own radius.
     total_charge : float, optional
-        Net charge of the deployed system, used by the D4 EEQ charges and by
-        a charge-predicting core; by default 0 (neutral).
+        Net charge of the deployed system, used by the D4 EEQ charges, by
+        the LES constraint or charge solve and by a charge-predicting core;
+        by default 0 (neutral).
     spin_multiplicity : float, optional
         Spin multiplicity of the deployed system, read by the two-channel
         AIMNet2 models; by default 1.
@@ -661,8 +767,8 @@ class TorchScriptPotential(nn.Module):
         node_energy = out[1]
         model_charges = out[2]
         energy_sr = node_energy.sum(dtype=torch.float64)
-        node_lr, charges = self.lr(features, atomic_numbers, p_s, cell_s, pbc,
-                                   edge_index, edge_vec)
+        node_lr, charges, les_charges, les_dipole = self.lr(
+            features, atomic_numbers, p_s, cell_s, pbc, edge_index, edge_vec)
         node_disp, eeq = self.disp(features, atomic_numbers, p_s, cell_s, pbc,
                                    edge_index, edge_vec)
         energy_lr = node_lr.sum(dtype=torch.float64)
@@ -700,6 +806,8 @@ class TorchScriptPotential(nn.Module):
             "stress": stress,
             "virial": -stress * volume,
             "latent_charges": charges,
+            "les_charges": les_charges,
+            "les_dipole": les_dipole,
             "eeq_charges": eeq,
             "charges": model_charges,
         }
@@ -737,10 +845,12 @@ class TorchScriptPotential(nn.Module):
             ``energy`` / ``total_energy`` ``(1,)``, ``energy_sr`` ``(1,)``,
             ``energy_lr`` ``(1,)``, ``energy_disp`` ``(1,)``, ``node_energy``
             ``(N,)``, ``forces`` ``(N, 3)``, ``stress`` ``(3, 3)``, ``virial``
-            ``(3, 3)``, ``latent_charges`` ``(N, n_channels)`` (empty without
-            LES), ``eeq_charges`` ``(N, 1)`` (empty without D4) and
-            ``charges`` ``(N,)``, the partial charges of a charge-predicting
-            core (empty otherwise).
+            ``(3, 3)``, ``latent_charges`` ``(N, n_channels)``,
+            ``les_charges`` ``(N,)`` and ``les_dipole`` ``(3,)`` (empty
+            without LES; ``energy_lr`` includes the charge-solve energy),
+            ``eeq_charges`` ``(N, 1)`` (empty without D4) and ``charges``
+            ``(N,)``, the partial charges of a charge-predicting core (empty
+            otherwise).
         """
         dtype = pos.dtype
         device = pos.device

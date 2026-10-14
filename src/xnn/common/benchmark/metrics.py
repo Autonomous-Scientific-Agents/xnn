@@ -223,21 +223,23 @@ def prediction_pairs(out: dict, data: AtomicGraph, targets: list[str],
         if mask is not None:
             s_pred, s_ref = s_pred[mask], s_ref[mask]
         pairs["stress"] = (s_pred.reshape(-1), s_ref.reshape(-1))
-    for key in ("dipole", "polarizability"):
-        ref = getattr(data, key, None)
+    for key, label in (("dipole", "dipole"), ("polarizability", "polarizability"),
+                       ("les_dipole", "dipole")):
+        ref = getattr(data, label, None)
         if key in targets and ref is not None and key in out:
             t_pred, t_ref = out[key].detach(), ref.detach()
-            mask = _scored(data, getattr(data, key + "_mask", None))
+            mask = _scored(data, getattr(data, label + "_mask", None))
             if mask is not None:
                 t_pred, t_ref = t_pred[mask], t_ref[mask]
             pairs[key] = (t_pred.reshape(-1), t_ref.reshape(-1))
-    if "charges" in targets and data.charges is not None and "charges" in out:
-        q_pred, q_ref = out["charges"].detach(), data.charges.detach()
-        mask = _scored(data, data.charges_mask)
-        if mask is not None:
-            atoms = mask[data.batch]
-            q_pred, q_ref = q_pred[atoms], q_ref[atoms]
-        pairs["charges"] = (q_pred.reshape(-1), q_ref.reshape(-1))
+    for key in ("charges", "les_charges"):
+        if key in targets and data.charges is not None and key in out:
+            q_pred, q_ref = out[key].detach(), data.charges.detach()
+            mask = _scored(data, data.charges_mask)
+            if mask is not None:
+                atoms = mask[data.batch]
+                q_pred, q_ref = q_pred[atoms], q_ref[atoms]
+            pairs[key] = (q_pred.reshape(-1), q_ref.reshape(-1))
     return pairs
 
 
@@ -281,8 +283,9 @@ def collect_predictions(model, loader, device, targets: list[str],
         Device to evaluate on.
     targets : list of str
         Which quantities to collect; a subset of ``"energy"``, ``"forces"``,
-        ``"stress"``, ``"dipole"``, ``"polarizability"`` and ``"charges"``
-        (per-atom partial charges). A target is
+        ``"stress"``, ``"dipole"``, ``"polarizability"``, ``"charges"``
+        (per-atom partial charges), ``"les_dipole"`` and ``"les_charges"``
+        (the LES outputs, scored against the dipole and charge labels). A target is
         skipped for a batch that lacks the reference value or the
         corresponding prediction.
     atomic_energies : torch.Tensor or None, optional

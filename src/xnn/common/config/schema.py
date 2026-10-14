@@ -187,6 +187,13 @@ class OptimConfig:
         Weight of the per-atom partial-charge term, for models with a
         ``charges`` output (the 3G / 4G HDNNP charge networks, PhysNet,
         AIMNet2) on data with ``charges`` labels. Defaults to ``0.0``.
+    les_dipole_weight : float
+        Weight of the LES dipole term: the ``les_dipole`` of a model wrapped
+        in :class:`~xnn.common.models.les.LatentEwald` against the ``dipole``
+        labels. Defaults to ``0.0``.
+    les_charge_weight : float
+        Weight of the LES charge term: ``les_charges`` against the
+        ``charges`` labels. Defaults to ``0.0``.
     scheduler : str
         Learning-rate scheduler (``none`` / ``cosine`` / ``plateau``). MACE uses
         ``ReduceLROnPlateau``. Defaults to ``"plateau"``.
@@ -241,6 +248,8 @@ class OptimConfig:
     dipole_weight: float = 0.0         # > 0 trains a dipole head on dipole labels
     polarizability_weight: float = 0.0  # > 0 trains a polarizability head (PaiNN)
     charge_weight: float = 0.0         # > 0 trains the predicted partial charges on charges labels
+    les_dipole_weight: float = 0.0     # > 0 trains the LES latent dipole on dipole labels
+    les_charge_weight: float = 0.0     # > 0 trains the LES latent charges on charges labels
     scheduler: str = "plateau"         # none / cosine / plateau (MACE: ReduceLROnPlateau)
     huber_delta: float = 0.0           # > 0 clips the loss tails; 0 = squared error
     huber_delta_energy: Optional[float] = None   # per-term overrides of huber_delta

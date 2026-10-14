@@ -67,18 +67,30 @@ def resolve_device(name: str) -> torch.device:
     return torch.device(name)
 
 
-def _check_charge_labels(base, train_set) -> None:
+def _check_charge_labels(base, train_set, optim=None) -> None:
     """Warn when a LatentEwald net-charge constraint will never see a charge label.
 
     With ``constrain_charge`` on, a structure without ``total_charge`` is
     pinned to neutrality. A training set in which no structure carries the
     key at all is either genuinely neutral, in which case the warning is
     harmless, or unlabeled, in which case every charged structure would be
-    fitted wrong, silently; this makes it visible once, at start.
+    fitted wrong, silently; this makes it visible once, at start. Likewise
+    the LES charge and dipole terms of ``optim`` are warned about when the
+    model has no LES wrapper or the set no label for them.
     """
     from ..models.les import LatentEwald
     les = [m for m in base.modules() if isinstance(m, LatentEwald)]
     structures = getattr(train_set, "structures", None)
+    if optim is not None:
+        for weight, label in (("les_charge_weight", "charges"), ("les_dipole_weight", "dipole")):
+            if getattr(optim, weight, 0.0) <= 0:
+                continue
+            if not les:
+                warnings.warn(f"{weight} > 0 but the model has no LES wrapper (long_range): "
+                              "the term is skipped.", stacklevel=3)
+            elif structures and not any(s.get(label) is not None for s in structures):
+                warnings.warn(f"{weight} > 0 but no training structure carries a "
+                              f"'{label}' label: the term is skipped.", stacklevel=3)
     if not les or not structures:
         return
     if (any(m.constrain_charge or m.charge_solve for m in les)
@@ -168,7 +180,8 @@ class _EMA:
 
 
 #: Properties scored by the error metrics (``trainer.metrics``).
-_METRIC_TARGETS = ["energy", "forces", "stress", "dipole", "polarizability", "charges"]
+_METRIC_TARGETS = ["energy", "forces", "stress", "dipole", "polarizability", "charges",
+                   "les_dipole", "les_charges"]
 
 
 class _Sums:
@@ -409,7 +422,7 @@ class Trainer:
         self.model = ForceStressOutput(base, compute_forces=force_on,
                                        compute_stress=stress_on).to(self.device)
         if self.is_main:
-            _check_charge_labels(base, train_set)
+            _check_charge_labels(base, train_set, o)
 
         # multi-head: the target sets belong to one head, the replay set to another
         replay_train = replay_val = None
@@ -771,6 +784,8 @@ class Trainer:
             dipole_weight=o.dipole_weight,
             polarizability_weight=o.polarizability_weight,
             charge_weight=o.charge_weight,
+            les_dipole_weight=o.les_dipole_weight,
+            les_charge_weight=o.les_charge_weight,
             huber_delta=o.huber_delta,
             huber_delta_energy=o.huber_delta_energy,
             huber_delta_forces=o.huber_delta_forces,
