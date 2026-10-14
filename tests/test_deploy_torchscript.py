@@ -185,6 +185,59 @@ def test_forces_are_translation_invariant_and_conservative():
             -(e_p - e_m) / (2 * h), abs=1e-6)
 
 
+def _les_model(species=(1, 8), **long_range):
+    base = {"name": "mace", "cutoff": CUTOFF, "n_features": 8, "n_interactions": 2, "n_rbf": 6,
+            "species": list(species), "max_ell": 2, "max_L": 1, "correlation": 2,
+            "hidden_irreps": "8x0e+8x1o", "MLP_irreps": "8x0e", "radial_MLP": [16, 16],
+            "num_polynomial_cutoff": 5, "avg_num_neighbors": 4.0,
+            "atomic_energies": [0.0] * len(species),
+            "long_range": {"n_channels": 2, "sigma": 1.0, "dl": 3.0, **long_range}}
+    torch.manual_seed(0)
+    return build_model(from_dict({"model": base, "data": {"cutoff": CUTOFF}}).model).eval()
+
+
+@pytest.mark.parametrize("options, periodic, charge, ion", [
+    ({"constrain_charge": True}, False, -1.0, False),
+    ({"constrain_charge": True, "charge_weights": "learned"}, True, 0.0, False),
+    ({"charge_solve": True}, False, 1.0, False),
+    ({"charge_solve": True, "hardness": "features", "fragments": True}, False, 1.0, True),
+    ({"charge_solve": True, "fragments": True, "method": "pme"}, True, 0.0, False),
+    ({"constrain_charge": True, "dipole_origin": "origin"}, False, 1.0, False),
+])
+def test_scripted_les_options_match_eager(options, periodic, charge, ion):
+    """Constraint, charge solve, fragments, PME and the charge outputs survive the export."""
+    model = _les_model(species=(1, 8, 11) if ion else (1, 8), **options)
+    pos, z = _water(2, seed=6)
+    if ion:
+        pos = np.concatenate([pos, [[7.0, 0.3, 0.1]]])
+        z = np.concatenate([z, [11]])
+    cell = np.eye(3) * 9.0 if periodic else None
+    pbc = np.array([periodic] * 3)
+    graph = structure_to_graph({"pos": pos, "atomic_numbers": z, "cell": cell, "pbc": pbc,
+                                "total_charge": charge}, CUTOFF)
+    ref = ForceStressOutput(model, compute_stress=periodic)(graph)
+    scripted = torch.jit.script(TorchScriptPotential(model, CUTOFF, total_charge=charge).eval())
+    out = scripted(torch.tensor(pos), torch.tensor(z),
+                   torch.tensor(cell) if cell is not None else None, torch.tensor(pbc))
+    assert float(out["energy"]) == pytest.approx(float(ref["energy"].sum()), abs=1e-8)
+    assert torch.allclose(out["forces"], ref["forces"], atol=1e-8)
+    assert torch.allclose(out["les_charges"], ref["les_charges"], atol=1e-10)
+    assert torch.allclose(out["les_dipole"], ref["les_dipole"][0], atol=1e-10)
+    assert float(out["les_charges"].sum()) == pytest.approx(charge, abs=1e-8)
+    assert float(out["node_energy"].sum()) == pytest.approx(float(out["energy"]), abs=1e-8)
+    if periodic:
+        assert torch.allclose(out["stress"], ref["stress"][0], atol=1e-8)
+        assert torch.all(out["les_dipole"] == 0)
+
+
+def test_scripted_fragments_refuse_a_wrong_total_charge():
+    model = _les_model(charge_solve=True, fragments=True)
+    pos, z = _water(2, seed=6)
+    scripted = torch.jit.script(TorchScriptPotential(model, CUTOFF, total_charge=1.0).eval())
+    with pytest.raises((RuntimeError, torch.jit.Error), match="total_charge"):
+        scripted(torch.tensor(pos), torch.tensor(z))
+
+
 def test_export_embeds_metadata(tmp_path):
     """The saved archive carries cutoff, long-range flag and caller metadata."""
     path = str(tmp_path / "deployed.pt")

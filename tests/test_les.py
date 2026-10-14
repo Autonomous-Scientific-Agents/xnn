@@ -530,6 +530,145 @@ def test_trainer_warns_when_the_constraint_sees_no_charge_labels(tmp_path):
         trainer(False, False)
 
 
+def _dipole_about(q, pos, numbers, origin):
+    from xnn.common.models.ops import ATOMIC_MASSES
+    if origin == "com":
+        m = np.asarray(ATOMIC_MASSES)[numbers][:, None]
+        center = (m * pos).sum(0) / m.sum()
+    elif origin == "centroid":
+        center = pos.mean(0)
+    else:
+        center = np.zeros(3)
+    return (q[:, None] * (pos - center)).sum(0)
+
+
+@pytest.mark.parametrize("origin", ["com", "centroid", "origin"])
+def test_les_charges_and_dipole_outputs(origin):
+    """The charge channel in e, and its dipole about the chosen origin for molecules only."""
+    model = _schnet_les(constrain_charge=True, charge_channel=1, dipole_origin=origin)
+    graphs = [_charged(1, 7, -1.0), _charged(2, 5, 0.0), _charged(3, 6, 1.0, periodic=True)]
+    batch = collate(graphs)
+    out = model(batch)
+    q, mu = out["les_charges"], out["les_dipole"]
+    assert q.shape == (18,) and mu.shape == (3, 3)
+    assert torch.allclose(q * LATENT_CHARGE_PER_E, out["latent_charges"][:, 1], atol=1e-12)
+    sums = torch.zeros(3).index_add_(0, batch.batch, q)
+    assert torch.allclose(sums, torch.tensor([-1.0, 0.0, 1.0]), atol=1e-10)
+    start = 0
+    for i, g in enumerate(graphs[:2]):
+        n = g.pos.shape[0]
+        ref = _dipole_about(q[start:start + n].detach().numpy(), g.pos.numpy(),
+                            g.atomic_numbers.numpy(), origin)
+        assert np.allclose(mu[i].detach().numpy(), ref, atol=1e-10)
+        start += n
+    assert torch.all(mu[2] == 0)
+    # a neutral molecule's dipole does not depend on the origin
+    neutral = _charged(2, 5, 0.0)
+    mus = [_schnet_les(constrain_charge=True, charge_channel=1, dipole_origin=o)(neutral)["les_dipole"]
+           for o in ("com", "centroid", "origin")]
+    assert torch.allclose(mus[0], mus[1], atol=1e-10) and torch.allclose(mus[0], mus[2], atol=1e-10)
+    # the charge solve exports the solved charges
+    solved = _schnet_les(charge_solve=True)(graphs[0])
+    assert torch.allclose(solved["les_charges"] * LATENT_CHARGE_PER_E,
+                          solved["latent_charges"][:, 0], atol=1e-12)
+
+
+def test_les_dipole_origin_is_validated_and_reaches_the_config_hook():
+    with pytest.raises(ValueError, match="dipole_origin"):
+        _schnet_les(dipole_origin="corner")
+    cfg = from_dict({"model": {**SCHNET, "extra": {"long_range": {
+        "n_channels": 1, "dipole_origin": "origin"}}}})
+    model = build_model(cfg.model)
+    assert isinstance(model, LatentEwald) and model.dipole_origin == "origin"
+    assert model.dipole_origin != _schnet_les().dipole_origin == "com"
+
+
+def test_les_charge_and_dipole_terms_fit_the_labels():
+    """The les_* loss terms score the LES outputs against the charge and dipole labels."""
+    from xnn.common.benchmark.metrics import prediction_pairs
+    from xnn.common.train import weighted_loss
+    rng = np.random.default_rng(7)
+    structs = []
+    for n, charge in ((5, 0.0), (4, 1.0)):
+        s = {"pos": rng.uniform(0, 4, (n, 3)), "atomic_numbers": ([8, 1] * n)[:n],
+             "total_charge": charge, "energy": 0.0, "forces": np.zeros((n, 3)),
+             "charges": rng.normal(scale=0.3, size=n), "dipole": rng.normal(size=3)}
+        s["charges"] += (charge - s["charges"].sum()) / n
+        structs.append(s)
+    cell = {"pos": rng.uniform(0, 5, (6, 3)), "atomic_numbers": [8, 1] * 3, "energy": 0.0,
+            "forces": np.zeros((6, 3)), "cell": np.eye(3) * 6.0, "pbc": [True] * 3,
+            "charges": rng.normal(scale=0.3, size=6)}
+    batch = collate([structure_to_graph(s, 4.5) for s in structs + [cell]])
+    assert batch.dipole_mask.tolist() == [True, True, False]
+    model = _schnet_les(constrain_charge=True)
+    pred = model(batch)
+    _, plain = weighted_loss(pred, batch, 1.0, 0.0, 0.0, charge_weight=1.0, dipole_weight=1.0)
+    assert "les_charge_mse" not in plain and "charge_mse" not in plain
+    loss, logs = weighted_loss(pred, batch, 1.0, 0.0, 0.0, les_charge_weight=2.0,
+                               les_dipole_weight=3.0)
+    q_err = float(((pred["les_charges"] - batch.charges) ** 2).mean())
+    mu_err = float(((pred["les_dipole"][:2] - batch.dipole[:2]) ** 2).mean(-1).mean())
+    assert logs["les_charge_mse"] == pytest.approx(q_err, rel=1e-10)
+    assert logs["les_dipole_mse"] == pytest.approx(mu_err, rel=1e-10)
+    assert float(loss) == pytest.approx(plain["loss"] + 2 * q_err + 3 * mu_err, rel=1e-10)
+    loss.backward()
+    assert any(p.grad is not None and float(p.grad.abs().sum()) > 0 for p in model.q_net.parameters())
+    pairs = prediction_pairs(pred, batch, ["les_dipole", "les_charges"])
+    assert pairs["les_dipole"][0].shape == (6,) and pairs["les_charges"][0].shape == (15,)
+
+
+def test_trainer_warns_when_les_terms_cannot_apply(tmp_path):
+    """A warning for les_* weights without an LES wrapper or without labels."""
+    import warnings
+    from xnn.common.data import AtomicDataset
+    from xnn.common.train import Trainer
+    rng = np.random.default_rng(0)
+
+    def structures(labeled):
+        out = []
+        for i in range(3):
+            s = {"pos": rng.uniform(0, 4, (4, 3)), "atomic_numbers": [1, 8, 1, 8],
+                 "energy": 0.0, "forces": np.zeros((4, 3))}
+            if labeled:
+                s["dipole"] = rng.normal(size=3)
+            out.append(s)
+        return out
+
+    def trainer(les, labeled):
+        extra = {"long_range": {"n_channels": 1}} if les else {}
+        cfg = from_dict({"model": {**SCHNET, "extra": extra},
+                         "data": {"batch_size": 3, "val_fraction": 0.34},
+                         "optim": {"epochs": 1, "les_dipole_weight": 1.0},
+                         "device": "cpu", "output_dir": str(tmp_path / "run")})
+        return Trainer(cfg, AtomicDataset(structures(labeled), cfg.model.cutoff))
+
+    with pytest.warns(UserWarning, match="no LES wrapper"):
+        trainer(False, True)
+    with pytest.warns(UserWarning, match="no training structure carries a 'dipole'"):
+        trainer(True, False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        trainer(True, True)
+
+
+def test_ase_calculator_reports_les_charges_and_dipole():
+    pytest.importorskip("ase")
+    from ase import Atoms
+    from xnn.common.deploy import XNNCalculator
+
+    model = ForceStressOutput(_schnet_les(constrain_charge=True)).eval()
+    atoms = Atoms(numbers=[8, 1, 1], positions=[[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]])
+    atoms.info["charge"] = -1.0
+    atoms.calc = XNNCalculator(model, cutoff=4.5)
+    assert atoms.get_charges().sum() == pytest.approx(-1.0, abs=1e-8)
+    assert atoms.get_dipole_moment().shape == (3,)
+    cell = Atoms(numbers=[8, 1, 1] * 2, positions=np.random.default_rng(1).uniform(0, 5, (6, 3)),
+                 cell=np.eye(3) * 6.0, pbc=True)
+    cell.calc = XNNCalculator(model, cutoff=4.5)
+    cell.get_potential_energy()
+    assert "charges" in cell.calc.results and "dipole" not in cell.calc.results
+
+
 def _roundoff(ew, pos, q):
     """eps times the sum of the magnitudes of the terms in ``ew.realspace(pos, q)``: how far two
     summation orders of the same terms can drift apart."""
