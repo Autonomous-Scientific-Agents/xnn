@@ -651,6 +651,59 @@ def test_trainer_warns_when_les_terms_cannot_apply(tmp_path):
         trainer(True, True)
 
 
+@pytest.mark.parametrize("solve", [False, True])
+def test_dielectric_screens_the_charge_channel_only(solve):
+    """The charge channel's long-range energy is divided by the dielectric; the others are not."""
+    kw = {"charge_solve": True} if solve else {"constrain_charge": True}
+    vacuum = _schnet_les(charge_channel=1, **kw)
+    screened = _schnet_les(charge_channel=1, dielectric=78.4, **kw)
+    screened.load_state_dict({k: v for k, v in vacuum.state_dict().items()
+                              if k != "log_dielectric"}, strict=False)
+    assert float(screened.dielectric) == pytest.approx(78.4)
+    g = _charged(1, 7, -1.0)
+    out_v, out_s = vacuum(g), screened(g)
+    # the same charges enter; only the charge channel's energy is scaled
+    if not solve:
+        assert torch.allclose(out_s["latent_charges"], out_v["latent_charges"], atol=1e-12)
+        q = out_v["latent_charges"]
+        ew = vacuum.ewald
+        per_channel = [float(ew(q[:, [c]], g.pos, g.batch, 1, None, None)) for c in range(3)]
+        expected = per_channel[0] + per_channel[1] / 78.4 + per_channel[2]
+        assert float(out_s["energy_lr"]) == pytest.approx(expected, rel=1e-10)
+        assert torch.allclose(out_s["les_charges"], out_v["les_charges"], atol=1e-12)
+    else:
+        # the solve sees the screened coupling: a large dielectric approaches the
+        # coupling-free minimum chi.q + 1/2 J q^2 under the constraint
+        assert not torch.allclose(out_s["les_charges"], out_v["les_charges"])
+        free = _schnet_les(charge_channel=1, dielectric=1e12, charge_solve=True)
+        free.load_state_dict({k: v for k, v in vacuum.state_dict().items()
+                              if k != "log_dielectric"}, strict=False)
+        out_f = free(g)
+        features = free.model(g)["node_features"]
+        chi = (free.q_net(features) + free.q_linear(features))[:, 1]
+        q = out_f["latent_charges"][:, 1]
+        grad = chi + out_f["hardness"] * q
+        assert torch.allclose(grad, out_f["chemical_potential"].expand_as(grad), atol=1e-6)
+    assert float(out_s["les_charges"].sum()) == pytest.approx(-1.0, abs=1e-8)
+
+
+def test_dielectric_is_learnable_and_validated():
+    with pytest.raises(ValueError, match="dielectric"):
+        _schnet_les(dielectric=0.0)
+    model = _schnet_les(constrain_charge=True, dielectric=10.0, learn_dielectric=True)
+    assert isinstance(model.log_dielectric, torch.nn.Parameter)
+    out = model(_charged(1, 7, 1.0))
+    out["energy"].sum().backward()
+    assert model.log_dielectric.grad is not None and float(model.log_dielectric.grad.abs()) > 0
+    fixed = _schnet_les(dielectric=10.0)
+    assert "log_dielectric" in fixed.state_dict() and not any(
+        n == "log_dielectric" for n, _ in fixed.named_parameters())
+    cfg = from_dict({"model": {**SCHNET, "extra": {"long_range": {
+        "n_channels": 1, "dielectric": 78.4, "learn_dielectric": True}}}})
+    built = build_model(cfg.model)
+    assert float(built.dielectric) == pytest.approx(78.4)
+
+
 def test_ase_calculator_reports_les_charges_and_dipole():
     pytest.importorskip("ase")
     from ase import Atoms

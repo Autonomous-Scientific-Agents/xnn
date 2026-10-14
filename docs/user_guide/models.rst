@@ -545,6 +545,7 @@ long-range energy.
      # long_range: {n_channels: 4, charge_solve: true}       # global charge equilibration
      # long_range: {n_channels: 4, method: pme}              # particle-mesh sum for large cells
      # long_range: {n_channels: 1, constrain_charge: true, dipole_origin: com}  # fit to dipoles
+     # long_range: {n_channels: 1, charge_solve: true, dielectric: 78.4}       # screened by a solvent
 
 Molecules use the exact real-space sum (``dl`` then has no effect).
 Outputs gain ``energy_sr``, ``energy_lr``, ``latent_charges``, plus
@@ -580,6 +581,14 @@ distant fragments): fragments are the covalently bonded groups, ions in
 stand alone, and a fragment's charge comes from the per-atom
 ``fragment_charges`` label of the structure file when present, else from
 that table.
+
+``dielectric`` divides the charge channel's long-range energy (and its
+Coulomb coupling in the charge solve) by a constant, 1 by default; set the
+solvent's value (78.4 for water) when the labels come from a continuum
+solvent model, so charges fitted to physical ones carry the screened
+interaction the labels contain. ``learn_dielectric: true`` fits it, through
+its logarithm, from ``dielectric`` as the start. The reported charges and
+dipole are unscreened.
 
 Dispersion (DFT-D4, DFT-D3)
 ---------------------------

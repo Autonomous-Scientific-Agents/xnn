@@ -233,8 +233,9 @@ class _LatentEwaldHead(nn.Module):
     long-range energy is computed by the same code as training -- only the
     batched, ``AtomicGraph``-shaped entry point is replaced by a
     single-structure one. The net-charge constraint, the charge solve (with
-    fragments from the ion table), the particle-mesh sum and the
-    ``les_charges`` / ``les_dipole`` outputs carry over.
+    fragments from the ion table), the dielectric screening, the
+    particle-mesh sum and the ``les_charges`` / ``les_dipole`` outputs carry
+    over.
 
     Parameters
     ----------
@@ -296,6 +297,7 @@ class _LatentEwaldHead(nn.Module):
         self.register_buffer("covalent_radii", radii, persistent=False)
         self.register_buffer("ion_charges", ions, persistent=False)
         self.register_buffer("masses", les.masses.clone(), persistent=False)
+        self.register_buffer("log_dielectric", les.log_dielectric.detach().clone())
         self.total_charge = float(total_charge)
         self.latent_unit = float(LATENT_CHARGE_PER_E)
         self.dipole_origin = str(les.dipole_origin)
@@ -369,7 +371,8 @@ class _LatentEwaldHead(nn.Module):
         if self.charge_solve:
             chi = q[:, self.charge_channel]
             hardness = self.hardness_of(features, atomic_numbers)
-            gamma = self.ewald.coulomb_matrix(pos, cell if periodic else None)
+            gamma = (self.ewald.coulomb_matrix(pos, cell if periodic else None)
+                     / torch.exp(self.log_dielectric).to(q.dtype))
             frag: Optional[Tensor] = None
             target_t = torch.full((1,), target_q, dtype=q.dtype, device=q.device)
             if self.fragments:
@@ -386,13 +389,17 @@ class _LatentEwaldHead(nn.Module):
             solved, _ = solve_charges(chi, hardness, gamma, target_t, frag)
             q = q.index_copy(1, channel, solved.unsqueeze(1))
             node_energy = node_energy + charge_energy(chi, hardness, solved)
+        # the charge channel's energy is divided by the dielectric
+        scale = torch.ones(q.shape[1], dtype=q.dtype, device=q.device)
+        scale = scale.index_fill(0, channel, torch.exp(-0.5 * self.log_dielectric).to(q.dtype))
+        q_s = q * scale.unsqueeze(0)
         if periodic:
             if self.ewald.method == "pme":
-                energy = self.ewald.reciprocal_pme(pos, q, cell)
+                energy = self.ewald.reciprocal_pme(pos, q_s, cell)
             else:
-                energy = self.ewald.reciprocal(pos, q, cell)
+                energy = self.ewald.reciprocal(pos, q_s, cell)
         else:
-            energy = self.ewald.realspace_single(pos, q)
+            energy = self.ewald.realspace_single(pos, q_s)
         node_energy = node_energy + energy / float(n)
         charges = q[:, self.charge_channel] / self.latent_unit
         if periodic:

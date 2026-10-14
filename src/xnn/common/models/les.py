@@ -678,6 +678,16 @@ class LatentEwald(InteratomicPotential):
         Origin of the ``"les_dipole"`` output: ``"com"`` (default) the
         center of mass, ``"centroid"`` the mean position, ``"origin"`` the
         coordinate origin. The choice only matters for charged structures.
+    dielectric : float, optional
+        Screening of the charge channel's long-range energy: its Ewald
+        energy (and, with the charge solve, its Coulomb coupling) is divided
+        by ``dielectric``, by default 1 (vacuum). Set it to the solvent's
+        constant (78.4 for water) when the labels come from a continuum
+        solvent model, so charges fitted to physical ones carry the screened
+        interaction those labels contain. The other channels are unscreened.
+    learn_dielectric : bool, optional
+        Make the dielectric a trainable parameter (its logarithm, so it stays
+        positive), starting from ``dielectric``. Off by default.
     dl, sigma, exponent, remove_self_interaction, method, pme_order, pme_oversample
         Passed to :class:`EwaldSummation` (``method: pme`` runs the periodic
         sum on a particle mesh). Note that ``dl`` acts on periodic
@@ -713,7 +723,8 @@ class LatentEwald(InteratomicPotential):
     ``les_dipole_weight`` fit them to ``charges`` and ``dipole`` labels; the
     keys are distinct from the ``"charges"`` / ``"dipole"`` outputs of models
     with charges of their own. With several channels only that channel is
-    exported.
+    exported. Both report the charges before the dielectric screening, which
+    acts on the energy only.
     """
 
     def __init__(self, model: InteratomicPotential, n_channels: int = 4,
@@ -726,7 +737,8 @@ class LatentEwald(InteratomicPotential):
                  fragments: bool = False, bond_factor: float = 1.2,
                  ion_charges: Optional[dict] = None, method: str = "kspace",
                  pme_order: int = 8, pme_oversample: float = 2.0,
-                 dipole_origin: str = "com"):
+                 dipole_origin: str = "com", dielectric: float = 1.0,
+                 learn_dielectric: bool = False):
         super().__init__()
         feature_dim = getattr(model, "node_feature_dim", None)
         if feature_dim is None:
@@ -787,7 +799,27 @@ class LatentEwald(InteratomicPotential):
                                     remove_self_interaction=remove_self_interaction,
                                     method=method, pme_order=pme_order,
                                     pme_oversample=pme_oversample)
+        if dielectric <= 0:
+            raise ValueError(f"dielectric must be positive, got {dielectric}")
+        log_eps = torch.tensor(math.log(float(dielectric)))
+        if learn_dielectric:
+            self.log_dielectric = nn.Parameter(log_eps)
+        else:
+            self.register_buffer("log_dielectric", log_eps)
         self.use_fast = "auto"
+
+    @property
+    def dielectric(self) -> Tensor:
+        """The current dielectric constant of the charge channel (a scalar tensor)."""
+        return torch.exp(self.log_dielectric)
+
+    def screened(self, q: Tensor) -> Tensor:
+        """``q`` with the charge channel divided by ``sqrt(dielectric)``, so the
+        Ewald energy of that channel is divided by the dielectric."""
+        scale = torch.ones(q.shape[1], dtype=q.dtype, device=q.device)
+        scale = scale.index_fill(0, torch.tensor([self.charge_channel], device=q.device),
+                                 torch.exp(-0.5 * self.log_dielectric).to(q.dtype))
+        return q * scale.unsqueeze(0)
 
     @torch.jit.unused
     def set_use_fast(self, use_fast) -> "LatentEwald":
@@ -856,7 +888,7 @@ class LatentEwald(InteratomicPotential):
         if chi is not None:
             q, node_charge_energy, mu, hardness, frag = self.solve_charges(
                 chi, q, features, data, pos, cell)
-        energy_lr = self.ewald(q, pos, data.batch, data.num_graphs, cell, data.pbc)
+        energy_lr = self.ewald(self.screened(q), pos, data.batch, data.num_graphs, cell, data.pbc)
         n_atoms = torch.bincount(data.batch, minlength=data.num_graphs)
         out["energy_sr"] = out["energy"]
         out["energy_lr"] = energy_lr
@@ -952,7 +984,8 @@ class LatentEwald(InteratomicPotential):
             periodic = (cell is not None
                         and bool(cell[i].diagonal().abs().sum() > 1e-6)
                         and (data.pbc is None or bool(data.pbc[i].any())))
-            gamma = coulomb_matrix(self.ewald, pos[idx], cell[i] if periodic else None)
+            gamma = (coulomb_matrix(self.ewald, pos[idx], cell[i] if periodic else None)
+                     / self.dielectric.to(chi.dtype))
             total = data.total_charge[i].to(chi.dtype) if data.total_charge is not None else None
             if frag_all is None:
                 frag_i = None

@@ -203,6 +203,8 @@ def _les_model(species=(1, 8), **long_range):
     ({"charge_solve": True, "hardness": "features", "fragments": True}, False, 1.0, True),
     ({"charge_solve": True, "fragments": True, "method": "pme"}, True, 0.0, False),
     ({"constrain_charge": True, "dipole_origin": "origin"}, False, 1.0, False),
+    ({"charge_solve": True, "dielectric": 78.4, "learn_dielectric": True}, False, 1.0, False),
+    ({"constrain_charge": True, "dielectric": 4.0}, True, 0.0, False),
 ])
 def test_scripted_les_options_match_eager(options, periodic, charge, ion):
     """Constraint, charge solve, fragments, PME and the charge outputs survive the export."""
@@ -216,26 +218,29 @@ def test_scripted_les_options_match_eager(options, periodic, charge, ion):
     graph = structure_to_graph({"pos": pos, "atomic_numbers": z, "cell": cell, "pbc": pbc,
                                 "total_charge": charge}, CUTOFF)
     ref = ForceStressOutput(model, compute_stress=periodic)(graph)
-    scripted = torch.jit.script(TorchScriptPotential(model, CUTOFF, total_charge=charge).eval())
-    out = scripted(torch.tensor(pos), torch.tensor(z),
-                   torch.tensor(cell) if cell is not None else None, torch.tensor(pbc))
-    assert float(out["energy"]) == pytest.approx(float(ref["energy"].sum()), abs=1e-8)
-    assert torch.allclose(out["forces"], ref["forces"], atol=1e-8)
-    assert torch.allclose(out["les_charges"], ref["les_charges"], atol=1e-10)
-    assert torch.allclose(out["les_dipole"], ref["les_dipole"][0], atol=1e-10)
-    assert float(out["les_charges"].sum()) == pytest.approx(charge, abs=1e-8)
-    assert float(out["node_energy"].sum()) == pytest.approx(float(out["energy"]), abs=1e-8)
-    if periodic:
-        assert torch.allclose(out["stress"], ref["stress"][0], atol=1e-8)
-        assert torch.all(out["les_dipole"] == 0)
+    potential = TorchScriptPotential(model, CUTOFF, total_charge=charge).eval()
+    args = (torch.tensor(pos), torch.tensor(z),
+            torch.tensor(cell) if cell is not None else None, torch.tensor(pbc))
+    for module in (potential, torch.jit.script(potential)):
+        out = module(*args)
+        assert float(out["energy"]) == pytest.approx(float(ref["energy"].sum()), abs=1e-8)
+        assert torch.allclose(out["forces"], ref["forces"], atol=1e-8)
+        assert torch.allclose(out["les_charges"], ref["les_charges"], atol=1e-10)
+        assert torch.allclose(out["les_dipole"], ref["les_dipole"][0], atol=1e-10)
+        assert float(out["les_charges"].sum()) == pytest.approx(charge, abs=1e-8)
+        assert float(out["node_energy"].sum()) == pytest.approx(float(out["energy"]), abs=1e-8)
+        if periodic:
+            assert torch.allclose(out["stress"], ref["stress"][0], atol=1e-8)
+            assert torch.all(out["les_dipole"] == 0)
 
 
 def test_scripted_fragments_refuse_a_wrong_total_charge():
     model = _les_model(charge_solve=True, fragments=True)
     pos, z = _water(2, seed=6)
-    scripted = torch.jit.script(TorchScriptPotential(model, CUTOFF, total_charge=1.0).eval())
-    with pytest.raises((RuntimeError, torch.jit.Error), match="total_charge"):
-        scripted(torch.tensor(pos), torch.tensor(z))
+    potential = TorchScriptPotential(model, CUTOFF, total_charge=1.0).eval()
+    for module in (potential, torch.jit.script(potential)):
+        with pytest.raises((ValueError, RuntimeError, torch.jit.Error), match="total_charge"):
+            module(torch.tensor(pos), torch.tensor(z))
 
 
 def test_export_embeds_metadata(tmp_path):
