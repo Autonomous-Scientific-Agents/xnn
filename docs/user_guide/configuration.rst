@@ -56,6 +56,8 @@ defaults, as YAML:
      dipole_weight: 0.0         # dipole / polarizability labels (PaiNN; PhysNet, AIMNet2 dipoles)
      polarizability_weight: 0.0
      charge_weight: 0.0         # partial-charge labels (HDNNP 3G / 4G; any model with charges)
+     les_dipole_weight: 0.0     # LES latent dipole against dipole labels
+     les_charge_weight: 0.0     # LES latent charges against charges labels
      huber_delta: 0.0           # > 0 clips the loss tails; per-term huber_delta_energy / _forces / _stress
      scheduler: plateau         # none / cosine / plateau
      clip_grad: 0.0             # max gradient norm per step; 0 = off

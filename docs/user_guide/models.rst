@@ -544,9 +544,16 @@ long-range energy.
      # long_range: {n_channels: 4, constrain_charge: true}   # charges sum to total_charge
      # long_range: {n_channels: 4, charge_solve: true}       # global charge equilibration
      # long_range: {n_channels: 4, method: pme}              # particle-mesh sum for large cells
+     # long_range: {n_channels: 1, constrain_charge: true, dipole_origin: com}  # fit to dipoles
 
 Molecules use the exact real-space sum (``dl`` then has no effect).
-Outputs gain ``energy_sr``, ``energy_lr`` and ``latent_charges``. For
+Outputs gain ``energy_sr``, ``energy_lr``, ``latent_charges``, plus
+``les_charges`` (the charge channel in e) and ``les_dipole`` (its dipole in
+e Angstrom about ``dipole_origin``: ``com``, ``centroid`` or ``origin``; zero
+for cells). ``les_charge_weight`` and ``les_dipole_weight`` in ``optim`` fit
+them to ``charges`` and ``dipole`` labels, which sets the scale of the latent
+charges where energies and forces alone leave it loose; the keys stay apart
+from the ``charges`` / ``dipole`` of models with charges of their own. For
 periodic cells ``method: pme`` evaluates the same sum on a particle mesh
 (smooth PME), whose cost grows as ``N log N`` instead of with the atoms times
 the wave vectors; it is accurate to the spline aliasing error, about 1e-6

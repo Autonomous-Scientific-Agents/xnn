@@ -52,7 +52,8 @@ Metrics, checkpoints and stopping
 =================================
 Besides the loss terms, every split reports the MAE and RMSE of each
 labelled property (``energy_mae`` per atom, ``forces_rmse``, ``stress_mae``,
-``dipole_*``, ``polarizability_*``, ``charges_*``), pooled over the whole set.
+``dipole_*``, ``polarizability_*``, ``charges_*``, ``les_dipole_*``,
+``les_charges_*``), pooled over the whole set.
 The ``trainer`` section decides what drives the run:
 
 .. code-block:: yaml
