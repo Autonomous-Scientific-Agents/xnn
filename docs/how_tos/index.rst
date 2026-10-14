@@ -4,9 +4,9 @@
 How-To Guides
 *************
 
-Short recipes, one task each. They assume xnn is installed
-(:ref:`installation`); the :ref:`User Guide <user-guide>` has the reference
-details.
+This page walks you through the How-To Guides: A collection of recipes, each
+focusing on a specific task. We assume that you have the xnn installed on your
+machine as explained in :ref:`installation` guide.
 
 .. toctree::
    :maxdepth: 2
