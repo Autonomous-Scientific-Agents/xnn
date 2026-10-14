@@ -138,7 +138,7 @@ the MolSSI Driver Interface.
 
 | Family | Models |
 |---|---|
-| Generic add-ons (`common`) | LES long-range electrostatics (k-space or particle-mesh sum; optionally charge-constrained or charge-equilibrated); DFT-D3 (zero, BJ, mzero, op damping) and DFT-D4 dispersion |
+| Generic add-ons (`common`) | LES long-range electrostatics (k-space or particle-mesh sum; optionally charge-constrained or charge-equilibrated; latent charges and dipoles trainable on labels); DFT-D3 (zero, BJ, mzero, op damping) and DFT-D4 dispersion |
 | Graph neural networks (`gnn`) | SchNet, DimeNet, DimeNet++, GemNet (-Q, -T, -dQ, -dT), PaiNN, NequIP, MACE, Allegro, CACE, AIMNet2 |
 | Dense neural networks (`dnn`) | ANI (ANI-1, ANI-1x, ANI-1ccx, ANI-2x), PhysNet, HDNNP (generations 1 to 4) |
 | Convolutional neural networks (`cnn`) | 3D steerable-/ conventional- / spherical-CNN |
