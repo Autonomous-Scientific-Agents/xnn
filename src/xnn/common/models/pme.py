@@ -27,7 +27,7 @@ not the continuous ``sinc^p`` approximation some codes use; the two agree
 to the aliasing error the mesh heuristic controls.
 """
 import math
-from typing import List
+from typing import List, Tuple
 
 import torch
 from torch import Tensor
@@ -130,6 +130,112 @@ def pme_mesh(cell: Tensor, alpha: float, accuracy: float) -> List[int]:
     return mesh
 
 
+def mesh_wavevectors(cell: Tensor, mesh: List[int]) -> Tuple[Tensor, Tensor]:
+    """The wave vectors of a mesh in FFT order: ``2 pi`` times the Miller
+    indices dotted with the reciprocal vectors.
+
+    Parameters
+    ----------
+    cell : Tensor
+        Lattice vectors as rows ``(3, 3)``.
+    mesh : list of int
+        Mesh dimensions ``(K_1, K_2, K_3)``.
+
+    Returns
+    -------
+    tuple of Tensor
+        ``k`` of shape ``(K_1, K_2, K_3, 3)`` and ``|k|^2`` of shape
+        ``(K_1, K_2, K_3)``, in 1/Angstrom.
+    """
+    dtype, device = cell.dtype, cell.device
+    axes: List[Tensor] = []
+    for size in mesh:
+        axes.append(torch.fft.fftfreq(size, d=1.0 / size, dtype=dtype, device=device))
+    grid = torch.meshgrid([axes[0], axes[1], axes[2]], indexing="ij")
+    miller = torch.stack([grid[0], grid[1], grid[2]], dim=-1)
+    kvec = 2.0 * math.pi * (miller @ torch.linalg.inv(cell).t())
+    return kvec, (kvec * kvec).sum(-1)
+
+
+def spread_charges(charges: Tensor, pos: Tensor, cell: Tensor, mesh: List[int],
+                   order: int) -> Tuple[Tensor, Tensor, Tensor]:
+    """Charges on the mesh by B-spline assignment (paper eq 4.6).
+
+    Parameters
+    ----------
+    charges : Tensor
+        ``(N,)`` or ``(N, C)`` for several channels.
+    pos : Tensor
+        Positions ``(N, 3)``.
+    cell : Tensor
+        Lattice vectors as rows ``(3, 3)``.
+    mesh : list of int
+        Mesh dimensions ``(K_1, K_2, K_3)``.
+    order : int
+        B-spline order ``p``.
+
+    Returns
+    -------
+    tuple of Tensor
+        The charge grid ``(C, K_1 K_2 K_3)`` (``C = 1`` for ``(N,)`` charges),
+        the flat grid indices ``(N, p^3)`` and the weights ``(N, p^3)`` of
+        every atom, for the back-interpolation.
+    """
+    dtype, device = pos.dtype, pos.device
+    n = pos.shape[0]
+    q = charges.reshape(n, -1)
+    k1, k2, k3 = mesh[0], mesh[1], mesh[2]
+    sizes = torch.tensor([k1, k2, k3], dtype=dtype, device=device)
+    u = (pos @ torch.linalg.inv(cell)) * sizes                            # (N, 3) scaled fractional
+    base = torch.floor(u)
+    weights = bspline_weights(u - base, order)                            # (N, 3, p)
+    offsets = torch.arange(order, dtype=dtype, device=device)
+    index = (base[:, :, None] - offsets).remainder(sizes[:, None]).to(torch.long)   # (N, 3, p)
+    w3 = (weights[:, 0, :, None, None] * weights[:, 1, None, :, None]
+          * weights[:, 2, None, None, :]).reshape(n, -1)                  # (N, p^3)
+    flat = (index[:, 0, :, None, None] * (k2 * k3) + index[:, 1, None, :, None] * k3
+            + index[:, 2, None, None, :]).reshape(n, -1)                   # (N, p^3)
+    grid = torch.zeros(q.shape[1], k1 * k2 * k3, dtype=dtype, device=device)
+    grid = grid.index_add(1, flat.reshape(-1), (q.t()[:, :, None] * w3[None]).reshape(q.shape[1], -1))
+    return grid, flat, w3
+
+
+def spline_moduli(mesh: List[int], order: int, dtype: torch.dtype, device: torch.device) -> Tensor:
+    """``B(m) = prod_i |b_i(m_i)|^2`` over the mesh (paper eq 4.7), ``(K_1, K_2, K_3)``."""
+    return (bspline_moduli(mesh[0], order, dtype, device)[:, None, None]
+            * bspline_moduli(mesh[1], order, dtype, device)[None, :, None]
+            * bspline_moduli(mesh[2], order, dtype, device)[None, None, :])
+
+
+def pme_weighted_sum(charges: Tensor, pos: Tensor, cell: Tensor, mesh: List[int], order: int,
+                     weight: Tensor) -> Tensor:
+    """``sum_c sum_m w(m) |S_c(m)|^2`` with the structure factors from the mesh.
+
+    The structure factors of every charge channel come from the transform of
+    the spread charges, ``|S(m)|^2 = B(m) |F(Q)(m)|^2``, so any reciprocal
+    sum with per-vector weights ``w(m)`` (``0`` where a vector is excluded)
+    runs on the mesh.
+
+    Parameters
+    ----------
+    charges : Tensor
+        ``(N,)`` or ``(N, C)``.
+    pos, cell, mesh, order
+        As in :func:`spread_charges`.
+    weight : Tensor
+        ``w(m)`` over the mesh in FFT order, ``(K_1, K_2, K_3)``.
+
+    Returns
+    -------
+    Tensor
+        The scalar sum.
+    """
+    grid, _, _ = spread_charges(charges, pos, cell, mesh, order)
+    transform = torch.fft.fftn(grid.view(grid.shape[0], mesh[0], mesh[1], mesh[2]), dim=(1, 2, 3))
+    power = (transform.real.square() + transform.imag.square()).sum(0)
+    return (weight * spline_moduli(mesh, order, pos.dtype, pos.device) * power).sum()
+
+
 def pme_reciprocal(charges: Tensor, pos: Tensor, cell: Tensor, alpha: float,
                    mesh: List[int], order: int) -> Tensor:
     """Per-atom reciprocal-space energies of one periodic structure, ``q_i phi(r_i) / 2``.
@@ -156,42 +262,18 @@ def pme_reciprocal(charges: Tensor, pos: Tensor, cell: Tensor, alpha: float,
         Coulomb constant), summing to ``E_rec`` of the module docstring.
     """
     dtype, device = pos.dtype, pos.device
-    n = pos.shape[0]
     k1, k2, k3 = mesh[0], mesh[1], mesh[2]
-    sizes = torch.tensor([k1, k2, k3], dtype=dtype, device=device)
-    recip = torch.linalg.inv(cell)                                        # columns: a_i^*
     volume = cell_volume(cell)
-
-    # charge assignment: p^3 grid points per atom, the outer product of the
-    # one-dimensional spline weights (paper eq 4.6)
-    u = (pos @ recip) * sizes                                             # (N, 3) scaled fractional
-    base = torch.floor(u)
-    weights = bspline_weights(u - base, order)                            # (N, 3, p)
-    offsets = torch.arange(order, dtype=dtype, device=device)
-    index = (base[:, :, None] - offsets).remainder(sizes[:, None]).to(torch.long)   # (N, 3, p)
-    w3 = (weights[:, 0, :, None, None] * weights[:, 1, None, :, None]
-          * weights[:, 2, None, None, :]).reshape(n, -1)                  # (N, p^3)
-    flat = (index[:, 0, :, None, None] * (k2 * k3) + index[:, 1, None, :, None] * k3
-            + index[:, 2, None, None, :]).reshape(n, -1)                   # (N, p^3)
-    grid = torch.zeros(k1 * k2 * k3, dtype=dtype, device=device)
-    grid = grid.index_add(0, flat.reshape(-1), (charges[:, None] * w3).reshape(-1))
+    grid, flat, w3 = spread_charges(charges, pos, cell, mesh, order)
 
     # the reciprocal potential on the mesh: F^-1[ G(m) F(Q)(m) ] with the
     # influence function G = K^3 / (pi V) exp(-pi^2 m^2 / alpha^2) / m^2 B(m)
-    f1 = torch.fft.fftfreq(k1, d=1.0 / k1, dtype=dtype, device=device)
-    f2 = torch.fft.fftfreq(k2, d=1.0 / k2, dtype=dtype, device=device)
-    f3 = torch.fft.fftfreq(k3, d=1.0 / k3, dtype=dtype, device=device)
-    mesh_axes = torch.meshgrid([f1, f2, f3], indexing="ij")
-    m1, m2, m3 = mesh_axes[0], mesh_axes[1], mesh_axes[2]
-    miller = torch.stack([m1, m2, m3], dim=-1)                             # (K1, K2, K3, 3)
-    mvec = miller @ recip.t()                                              # rows m . a_i^*
-    m2sq = (mvec * mvec).sum(-1)
+    kvec, k2sq = mesh_wavevectors(cell, mesh)
+    m2sq = k2sq / (4.0 * math.pi * math.pi)
     safe = torch.where(m2sq > 0, m2sq, torch.ones_like(m2sq))
-    moduli = (bspline_moduli(k1, order, dtype, device)[:, None, None]
-              * bspline_moduli(k2, order, dtype, device)[None, :, None]
-              * bspline_moduli(k3, order, dtype, device)[None, None, :])
     influence = (k1 * k2 * k3) / (math.pi * volume) \
-        * torch.exp(-(math.pi ** 2) * safe / (alpha * alpha)) / safe * moduli
+        * torch.exp(-(math.pi ** 2) * safe / (alpha * alpha)) / safe \
+        * spline_moduli(mesh, order, dtype, device)
     influence = torch.where(m2sq > 0, influence, torch.zeros_like(influence))
     transform = torch.fft.fftn(grid.view(k1, k2, k3))
     potential = torch.real(torch.fft.ifftn(transform * influence)).reshape(-1)

@@ -50,6 +50,7 @@ from .charge_solve import (bonded_fragments, charge_energy, coulomb_matrix, cova
                            fragment_targets, ion_charge_table, solve_charges)
 from .dispersion import BOHR, HARTREE
 from .ops import cell_volume, scatter_sum
+from .pme import mesh_wavevectors, pme_weighted_sum
 
 from ..data import AtomicGraph
 from .base import InteratomicPotential
@@ -97,6 +98,19 @@ def intra_structure_pairs(batch: Tensor, num_graphs: int) -> Tuple[Tensor, Tenso
     return order[i[keep]], order[j[keep]]
 
 
+def smooth_size(n: float) -> int:
+    """The smallest integer of at least ``n`` (and 8) with no prime factor above 5."""
+    size = max(8, int(math.ceil(n)))
+    while True:
+        rest = size
+        for prime in (2, 3, 5):
+            while rest % prime == 0:
+                rest //= prime
+        if rest == 1:
+            return size
+        size += 1
+
+
 class EwaldSummation(nn.Module, FastPathModule):
     """Ewald energy of a (latent) per-atom variable ``q`` (paper eqs 3-5).
 
@@ -132,6 +146,16 @@ class EwaldSummation(nn.Module, FastPathModule):
         ``n_channels``-fold over-subtraction); xnn subtracts it once. The
         two agree for 1-dimensional ``q`` and always when the flag is off.
 
+    method : str, optional
+        ``"kspace"`` (default): the reference reciprocal sum over the
+        wave-vector sphere (or its factorized fast path); ``"pme"``: the same
+        sum through a particle mesh (:meth:`reciprocal_pme`), ``N log N``
+        in the atoms, approximate to the spline aliasing error.
+    pme_order, pme_oversample : int, float, optional
+        B-spline order (8) and mesh density relative to the sphere (2.0) of
+        the mesh sum; at these defaults the energy agrees with the reference
+        sum to about 1e-7 relative and the forces and stress to about 1e-6.
+
     Notes
     -----
     Charges are in scaled units (upstream ``norm_factor = 1``): a physical
@@ -141,14 +165,22 @@ class EwaldSummation(nn.Module, FastPathModule):
     """
 
     def __init__(self, dl: float = 2.0, sigma: float = 1.0, exponent: int = 1,
-                 remove_self_interaction: bool = False):
+                 remove_self_interaction: bool = False, method: str = "kspace",
+                 pme_order: int = 8, pme_oversample: float = 2.0):
         super().__init__()
         if exponent not in (1, 6):
             raise ValueError(f"exponent must be 1 or 6, got {exponent}")
+        if method not in ("kspace", "pme"):
+            raise ValueError(f"method must be 'kspace' or 'pme', got {method!r}")
+        if pme_order < 2 or pme_oversample < 1.0:
+            raise ValueError("pme_order must be at least 2 and pme_oversample at least 1")
         self.dl = dl
         self.sigma = sigma
         self.exponent = exponent
         self.remove_self_interaction = remove_self_interaction
+        self.method = method
+        self.pme_order = int(pme_order)
+        self.pme_oversample = float(pme_oversample)
         # the factorized reciprocal sum (reciprocal_fast), chosen per evaluation
         # by the owning LatentEwald for the structures of at least
         # fast_min_atoms atoms; off under TorchScript
@@ -270,6 +302,36 @@ class EwaldSummation(nn.Module, FastPathModule):
         sk_sq = re_sk.square() + im_sk.square()
         energy = (2.0 * (self._kfac(k2).unsqueeze(1) * sk_sq).sum()
                   / cell_volume(cell))
+        if self.remove_self_interaction and self.exponent == 1:
+            energy = energy - self._self_energy(q)
+        return energy
+
+    def pme_mesh(self, cell: Tensor) -> List[int]:
+        """Mesh dimensions of :meth:`reciprocal_pme`: the smallest FFT-friendly
+        sizes (factors 2, 3 and 5) holding the wave-vector sphere
+        ``|k| <= 2 pi / dl`` ``pme_oversample`` times over."""
+        lengths = torch.linalg.norm(cell.detach(), dim=1)
+        mesh: List[int] = []
+        for i in range(3):
+            mesh.append(smooth_size(2.0 * self.pme_oversample * float(lengths[i]) / self.dl))
+        return mesh
+
+    def reciprocal_pme(self, pos: Tensor, q: Tensor, cell: Tensor) -> Tensor:
+        """:meth:`reciprocal` through a particle mesh (smooth PME).
+
+        The same wave vectors (the sphere ``|k| <= 2 pi / dl``) and weights,
+        with the structure factors from B-spline-spread charges on a mesh
+        (:func:`~xnn.common.models.pme.pme_weighted_sum`), so the cost grows
+        as ``N log N`` instead of ``N`` times the number of vectors. It
+        approximates the reference sum to the spline aliasing error, set by
+        ``pme_order`` and ``pme_oversample``.
+        """
+        mesh = self.pme_mesh(cell)
+        _, k2 = mesh_wavevectors(cell, mesh)
+        inside = (k2 > 0) & (k2 <= (2.0 * math.pi / self.dl) ** 2 * (1.0 + 1e-9))
+        safe = torch.where(inside, k2, torch.ones_like(k2))
+        weight = torch.where(inside, self._kfac(safe), torch.zeros_like(k2)) / cell_volume(cell)
+        energy = pme_weighted_sum(q, pos, cell, mesh, self.pme_order, weight)
         if self.remove_self_interaction and self.exponent == 1:
             energy = energy - self._self_energy(q)
         return energy
@@ -458,8 +520,11 @@ class EwaldSummation(nn.Module, FastPathModule):
         out = self.realspace_batch(pos[molecular], q[molecular], batch[molecular], num_graphs)
         for i in periodic.nonzero().flatten().tolist():
             mask = batch == i
-            use_fast = self.fast_active and int(mask.sum()) >= self.fast_min_atoms
-            reciprocal = self.reciprocal_fast if use_fast else self.reciprocal
+            if self.method == "pme":
+                reciprocal = self.reciprocal_pme
+            else:
+                use_fast = self.fast_active and int(mask.sum()) >= self.fast_min_atoms
+                reciprocal = self.reciprocal_fast if use_fast else self.reciprocal
             out = out.index_put((torch.tensor([i], device=out.device),),
                                 reciprocal(pos[mask], q[mask], cell[i]).reshape(1))
         return out
@@ -548,8 +613,9 @@ class LatentEwald(InteratomicPotential):
         Formal charges by element symbol or atomic number, by default
         :data:`~xnn.common.models.charge_solve.ION_CHARGES` (the alkali,
         alkaline-earth and halide ions).
-    dl, sigma, exponent, remove_self_interaction
-        Passed to :class:`EwaldSummation`. Note that ``dl`` acts on periodic
+    dl, sigma, exponent, remove_self_interaction, method, pme_order, pme_oversample
+        Passed to :class:`EwaldSummation` (``method: pme`` runs the periodic
+        sum on a particle mesh). Note that ``dl`` acts on periodic
         structures only and ``exponent = 6`` is periodic-only as well (the
         real-space branch that molecular structures take implements the
         ``1/r`` kernel), so a dataset without cells trains neither.
@@ -583,7 +649,8 @@ class LatentEwald(InteratomicPotential):
                  charge_weights: str = "uniform", charge_solve: bool = False,
                  hardness: str = "element", hardness_init: float = 10.0,
                  fragments: bool = False, bond_factor: float = 1.2,
-                 ion_charges: Optional[dict] = None):
+                 ion_charges: Optional[dict] = None, method: str = "kspace",
+                 pme_order: int = 8, pme_oversample: float = 2.0):
         super().__init__()
         feature_dim = getattr(model, "node_feature_dim", None)
         if feature_dim is None:
@@ -635,7 +702,9 @@ class LatentEwald(InteratomicPotential):
             self.register_buffer("covalent_radii", covalent_radii(), persistent=False)
             self.register_buffer("ion_charges", ion_charge_table(ion_charges), persistent=False)
         self.ewald = EwaldSummation(dl=dl, sigma=sigma, exponent=exponent,
-                                    remove_self_interaction=remove_self_interaction)
+                                    remove_self_interaction=remove_self_interaction,
+                                    method=method, pme_order=pme_order,
+                                    pme_oversample=pme_oversample)
         self.use_fast = "auto"
 
     @torch.jit.unused

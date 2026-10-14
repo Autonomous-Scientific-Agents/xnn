@@ -543,9 +543,18 @@ long-range energy.
      long_range: {n_channels: 4, sigma: 1.0, dl: 2.0}
      # long_range: {n_channels: 4, constrain_charge: true}   # charges sum to total_charge
      # long_range: {n_channels: 4, charge_solve: true}       # global charge equilibration
+     # long_range: {n_channels: 4, method: pme}              # particle-mesh sum for large cells
 
 Molecules use the exact real-space sum (``dl`` then has no effect).
-Outputs gain ``energy_sr``, ``energy_lr`` and ``latent_charges``.
+Outputs gain ``energy_sr``, ``energy_lr`` and ``latent_charges``. For
+periodic cells ``method: pme`` evaluates the same sum on a particle mesh
+(smooth PME), whose cost grows as ``N log N`` instead of with the atoms times
+the wave vectors; it is accurate to the spline aliasing error, about 1e-6
+relative in the forces at the defaults ``pme_order`` 8 and ``pme_oversample``
+2. LES is the long-range
+electrostatics for models without charges of their own; the charge-predicting
+models (AIMNet2, PhysNet, SpookyNet, BAMBOO, HDNNP 3G/4G) keep their own
+``coulomb`` or ``electrostatics`` options, and LES is refused on them.
 
 Two options tie the charges to the structure's ``total_charge`` (its
 ``charge`` label; missing means neutral). ``constrain_charge`` shifts each
