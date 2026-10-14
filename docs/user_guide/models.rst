@@ -543,9 +543,26 @@ long-range energy.
      long_range: {n_channels: 4, sigma: 1.0, dl: 2.0}
      # long_range: {n_channels: 4, constrain_charge: true}   # charges sum to total_charge
      # long_range: {n_channels: 4, charge_solve: true}       # global charge equilibration
+     # long_range: {n_channels: 4, method: pme}              # particle-mesh sum for large cells
+     # long_range: {n_channels: 1, constrain_charge: true, dipole_origin: com}  # fit to dipoles
+     # long_range: {n_channels: 1, charge_solve: true, dielectric: 78.4}       # screened by a solvent
 
 Molecules use the exact real-space sum (``dl`` then has no effect).
-Outputs gain ``energy_sr``, ``energy_lr`` and ``latent_charges``.
+Outputs gain ``energy_sr``, ``energy_lr``, ``latent_charges``, plus
+``les_charges`` (the charge channel in e) and ``les_dipole`` (its dipole in
+e Angstrom about ``dipole_origin``: ``com``, ``centroid`` or ``origin``; zero
+for cells). ``les_charge_weight`` and ``les_dipole_weight`` in ``optim`` fit
+them to ``charges`` and ``dipole`` labels, which sets the scale of the latent
+charges where energies and forces alone leave it loose; the keys stay apart
+from the ``charges`` / ``dipole`` of models with charges of their own. For
+periodic cells ``method: pme`` evaluates the same sum on a particle mesh
+(smooth PME), whose cost grows as ``N log N`` instead of with the atoms times
+the wave vectors; it is accurate to the spline aliasing error, about 1e-6
+relative in the forces at the defaults ``pme_order`` 8 and ``pme_oversample``
+2. LES is the long-range
+electrostatics for models without charges of their own; the charge-predicting
+models (AIMNet2, PhysNet, SpookyNet, BAMBOO, HDNNP 3G/4G) keep their own
+``coulomb`` or ``electrostatics`` options, and LES is refused on them.
 
 Two options tie the charges to the structure's ``total_charge`` (its
 ``charge`` label; missing means neutral). ``constrain_charge`` shifts each
@@ -564,6 +581,14 @@ distant fragments): fragments are the covalently bonded groups, ions in
 stand alone, and a fragment's charge comes from the per-atom
 ``fragment_charges`` label of the structure file when present, else from
 that table.
+
+``dielectric`` divides the charge channel's long-range energy (and its
+Coulomb coupling in the charge solve) by a constant, 1 by default; set the
+solvent's value (78.4 for water) when the labels come from a continuum
+solvent model, so charges fitted to physical ones carry the screened
+interaction the labels contain. ``learn_dielectric: true`` fits it, through
+its logarithm, from ``dielectric`` as the start. The reported charges and
+dipole are unscreened.
 
 Dispersion (DFT-D4, DFT-D3)
 ---------------------------

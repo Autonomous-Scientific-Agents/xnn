@@ -205,9 +205,29 @@ def prepare_model(cfg):
             model = add_dispersion(model, new_wrappers[key])
         else:
             from .les import LatentEwald
+            if has_electrostatics(model):
+                raise ValueError(
+                    f"{type(model).__name__} already includes the electrostatics of its own "
+                    "charges; adding LES (long_range) would count them twice. Turn the "
+                    "model's electrostatics off to use LES instead.")
             opts = dict(new_wrappers[key]) if isinstance(new_wrappers[key], dict) else {}
             model = LatentEwald(model, **opts)
     return model, cfg
+
+
+def has_electrostatics(model) -> bool:
+    """Whether a model adds the Coulomb energy of charges it predicts itself.
+
+    The charge-predicting models carry the flag under their own names:
+    ``coulomb`` (AIMNet2), ``use_electrostatics`` (PhysNet, BAMBOO),
+    ``electrostatics`` (SpookyNet) and the generation of HDNNP (3G and 4G).
+    """
+    from .dispersion import DispersionCorrection
+    inner = model
+    while isinstance(inner, DispersionCorrection):
+        inner = inner.model
+    return bool(getattr(inner, "coulomb", None) or getattr(inner, "use_electrostatics", False)
+                or getattr(inner, "electrostatics", None) or getattr(inner, "generation", 0) >= 3)
 
 
 def _as_reference_mapping(values, model) -> dict:

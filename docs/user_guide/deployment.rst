@@ -13,7 +13,7 @@ ASE calculator
 ==============
 :class:`~xnn.common.deploy.ase_calculator.XNNCalculator` (``ase`` extra)
 makes any model a standard calculator with energy, forces, stress and, for
-charge-predicting models, charges and dipole:
+charge-predicting and LES models, charges and dipole:
 
 .. code-block:: python
 
@@ -39,8 +39,9 @@ writes a ``.pt`` file that carries its own neighbor list and needs only
    out = model.forward_lammps(pos, edge_index, cell_shifts, atomic_numbers, cell)   # pair style
 
 ``forward`` returns ``energy``, ``node_energy``, ``forces``, ``stress`` and
-``virial`` (plus ``energy_sr`` / ``energy_lr`` / ``latent_charges`` for LES
-models and ``charges`` for AIMNet2). ``forward_lammps`` follows the
+``virial`` (plus ``energy_sr`` / ``energy_lr`` / ``latent_charges`` /
+``les_charges`` / ``les_dipole`` for LES models and ``charges`` for
+AIMNet2). ``forward_lammps`` follows the
 ``pair_nequip`` / ``pair_allegro`` / ``pair_mace`` pattern: the engine
 supplies its neighbor list. Rules of the artifact:
 
@@ -49,7 +50,9 @@ supplies its neighbor list. Rules of the artifact:
 - ``torch.no_grad()`` is fine (grad is re-enabled inside for the forces);
   ``torch.inference_mode()`` is not supported.
 - The net charge and spin multiplicity are fixed at export
-  (``--total-charge``, ``--spin-multiplicity``).
+  (``--total-charge``, ``--spin-multiplicity``); the LES constraint and
+  charge solve read the net charge, and fragments take their charges from
+  the ion table.
 - The cutoff and a ``long_range`` flag are stored as extra files:
   ``torch.jit.load(path, _extra_files={"cutoff": "", "long_range": ""})``.
 - The built-in neighbor list is the brute-force reference; for large cells

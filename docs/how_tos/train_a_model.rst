@@ -4,17 +4,25 @@
 Train a Model
 *************
 
-One :class:`~xnn.common.config.schema.Config` schema, three ways to fill it:
-YAML, the command line, and Hydra.
+xnn offers one :class:`~xnn.common.config.schema.Config` schema but three
+interfaces to populate it: YAML, the command line, and Hydra.
 
 Write a config file
 ===================
-Any ``model`` key that is not a core field goes into ``model.extra``, so model
-options are written flat:
+One of the simplest ways to control the training, evaluation, deployment and
+benchmarking of a model in xnn is to write a YAML file. There are different
+sections in the YAML file. For example, ``model``, ``data``, ``optim``,
+``device``, ``seed``, and ``output_dir``. A ``model`` entry has two groups of
+keywords: The core group which is general to all models, and the model-specific
+group which is defined in the ``model.extra`` field. 
+
+Below, we create a new config file ``my_train.yaml`` for training a MACE model
+on argon data (bundled in ``data/argon_train.xyz`` in xnn).
 
 .. code-block:: yaml
 
    # my_train.yaml
+
    model:
      name: mace
      cutoff: 4.0
@@ -28,7 +36,7 @@ options are written flat:
    data:
      train_path: data/argon_train.xyz
      val_path: data/argon_val.xyz
-     test_path: data/argon_test.xyz    # optional, evaluated once after training
+     test_path: data/argon_test.xyz    # Optional; evaluated once after training
      batch_size: 8
 
    optim:
@@ -42,19 +50,24 @@ options are written flat:
    seed: 1234
    output_dir: runs/argon_mace
 
-The bundled ``configs/train.yaml`` composes per-model files from
-``configs/model/`` with a Hydra-style ``defaults`` list.
+xnn comes with pre-made config files such as ``configs/train.yaml`` which can be
+combined with other per-model YAML files from ``configs/model/`` to create
+hierarchical composite Hydra-style files with a ``defaults`` list.
 
 Run it
 ======
+
+You can run the training with the command line interface using the config file
+you just created:
 
 .. code-block:: bash
 
    xnn train --config my_train.yaml
    xnn train --config my_train.yaml --set optim.epochs=50 model.cutoff=6.0
 
-The command reads the structure files with ASE (``ase`` extra). The same from
-Python:
+These command read the ASE structure files (``*.xyz``) which require ``ase``
+extra dependency to be installed. The same training job can be driven from the
+xnn's Python API:
 
 .. code-block:: python
 
@@ -66,21 +79,24 @@ Python:
    train = AtomicDataset.from_file(cfg.data.train_path, cfg.model.cutoff)
    Trainer(cfg, train).fit()
 
-Several GPUs
-============
-Start the same command through ``torchrun`` and the trainer runs data
-parallel with no config changes:
+Multi-GPU Training
+==================
+As all xnn models are implemented in PyTorch, you can prepend the same xnn
+command through with a ``torchrun`` driver to distribute the training on
+multiple GPUs. The trainer will run the training in data-parallel mode by
+default with no config changes:
 
 .. code-block:: bash
 
    torchrun --nproc-per-node 4 -m xnn train --config my_train.yaml
 
-``data.batch_size`` is per process. See :ref:`training` for multi-node runs.
+Note that the ``data.batch_size`` is a per-process (per-GPU) variable. See
+:ref:`training` for multi-node run settings.
 
 Hydra
 =====
-With the ``hydra`` extra, a Hydra application hands its ``DictConfig`` to xnn
-directly:
+With the ``hydra`` extra dependency installed, a Hydra-driven application can
+hand its ``DictConfig`` object to xnn seamlessly:
 
 .. code-block:: python
 

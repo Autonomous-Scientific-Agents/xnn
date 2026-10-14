@@ -138,7 +138,7 @@ the MolSSI Driver Interface.
 
 | Family | Models |
 |---|---|
-| Generic add-ons (`common`) | LES long-range electrostatics (optionally charge-constrained or charge-equilibrated); DFT-D3 (zero, BJ, mzero, op damping) and DFT-D4 dispersion |
+| Generic add-ons (`common`) | LES long-range electrostatics (k-space or particle-mesh sum; optionally charge-constrained or charge-equilibrated; latent charges and dipoles trainable on labels); DFT-D3 (zero, BJ, mzero, op damping) and DFT-D4 dispersion |
 | Graph neural networks (`gnn`) | SchNet, DimeNet, DimeNet++, GemNet (-Q, -T, -dQ, -dT), PaiNN, NequIP, MACE, Allegro, CACE, AIMNet2 |
 | Dense neural networks (`dnn`) | ANI (ANI-1, ANI-1x, ANI-1ccx, ANI-2x), PhysNet, HDNNP (generations 1 to 4) |
 | Convolutional neural networks (`cnn`) | 3D steerable-/ conventional- / spherical-CNN |
@@ -176,7 +176,7 @@ If you use xnn in your work, please cite it as:
   author  = {Mostafanejad, Mohammad},
   title   = {xnn: Machine-learning interatomic potentials for molecules and materials},
   year    = {2026},
-  version = {0.11.0},
+  version = {0.14.0},
   url     = {https://github.com/molssi-ai/xnn}
 }
 ```

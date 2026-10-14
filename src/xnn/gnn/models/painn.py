@@ -92,53 +92,11 @@ from torch import Tensor, nn
 from xnn.common.data import AtomicGraph
 from xnn.common.featurizers import CosineCutoff, GaussianRBF
 from xnn.common.models.base import InteratomicPotential
-from xnn.common.models.ops import scatter_sum
+from xnn.common.models.ops import ATOMIC_MASSES, center_of_mass, scatter_sum
 from xnn.common.models.registry import register_model
 from xnn.gnn.featurizers import BesselRBF
 
 _MAX_Z = 100
-
-#: Standard atomic weights (u) by atomic number, Z = 0 to 99 (the ASE table),
-#: for the center of mass of the tensorial heads.
-ATOMIC_MASSES = [
-    1.0000, 1.0080, 4.0026, 6.9400, 9.0122, 10.8100, 12.0110, 14.0070, 15.9990, 18.9984,
-    20.1797, 22.9898, 24.3050, 26.9815, 28.0850, 30.9738, 32.0600, 35.4500, 39.9480, 39.0983,
-    40.0780, 44.9559, 47.8670, 50.9415, 51.9961, 54.9380, 55.8450, 58.9332, 58.6934, 63.5460,
-    65.3800, 69.7230, 72.6300, 74.9216, 78.9710, 79.9040, 83.7980, 85.4678, 87.6200, 88.9058,
-    91.2240, 92.9064, 95.9500, 97.9072, 101.0700, 102.9055, 106.4200, 107.8682, 112.4140, 114.8180,
-    118.7100, 121.7600, 127.6000, 126.9045, 131.2930, 132.9055, 137.3270, 138.9055, 140.1160, 140.9077,
-    144.2420, 144.9128, 150.3600, 151.9640, 157.2500, 158.9254, 162.5000, 164.9303, 167.2590, 168.9342,
-    173.0540, 174.9668, 178.4900, 180.9479, 183.8400, 186.2070, 190.2300, 192.2170, 195.0840, 196.9666,
-    200.5920, 204.3800, 207.2000, 208.9804, 208.9824, 209.9872, 222.0176, 223.0197, 226.0254, 227.0277,
-    232.0377, 231.0359, 238.0289, 237.0482, 244.0642, 243.0614, 247.0703, 247.0703, 251.0796, 252.0830,
-]
-
-
-def center_of_mass(pos: Tensor, atomic_numbers: Tensor, batch: Tensor,
-                   num_graphs: int, masses: Tensor) -> Tensor:
-    """Center of mass of every structure of a batch.
-
-    Parameters
-    ----------
-    pos : Tensor
-        Positions ``(N, 3)``.
-    atomic_numbers : Tensor
-        Atomic numbers ``(N,)``.
-    batch : Tensor
-        Structure index of every atom ``(N,)``.
-    num_graphs : int
-        Number of structures ``B``.
-    masses : Tensor
-        Mass table indexed by atomic number.
-
-    Returns
-    -------
-    Tensor
-        The centers of mass ``(B, 3)``.
-    """
-    m = masses[atomic_numbers].to(pos.dtype).unsqueeze(-1)
-    total = scatter_sum(m, batch, num_graphs)
-    return scatter_sum(m * pos, batch, num_graphs) / total
 
 
 class GatedEquivariantBlock(nn.Module):

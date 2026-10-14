@@ -12,9 +12,10 @@ import os
 import sys
 
 # Make the package importable without installation (docs/ -> repo root -> src/)
-sys.path.insert(0, os.path.abspath(os.path.join("..", "src")))
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_here, "..", "src"))
 # Local Sphinx extensions (docs/_ext/)
-sys.path.insert(0, os.path.abspath("_ext"))
+sys.path.insert(0, os.path.join(_here, "_ext"))
 
 # General configuration
 

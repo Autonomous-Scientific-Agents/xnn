@@ -49,7 +49,8 @@ from torch.nn import functional as F
 from .charge_solve import (bonded_fragments, charge_energy, coulomb_matrix, covalent_radii,
                            fragment_targets, ion_charge_table, solve_charges)
 from .dispersion import BOHR, HARTREE
-from .ops import cell_volume, scatter_sum
+from .ops import ATOMIC_MASSES, cell_volume, center_of_mass, scatter_sum
+from .pme import mesh_wavevectors, pme_weighted_sum
 
 from ..data import AtomicGraph
 from .base import InteratomicPotential
@@ -97,6 +98,37 @@ def intra_structure_pairs(batch: Tensor, num_graphs: int) -> Tuple[Tensor, Tenso
     return order[i[keep]], order[j[keep]]
 
 
+def periodic_structures(cell: Optional[Tensor], pbc: Optional[Tensor], num_graphs: int,
+                        device: torch.device) -> Tensor:
+    """Which structures of a batch are periodic, ``(B,)`` bool.
+
+    A structure is periodic when its cell is nonzero and, if ``pbc`` is
+    given, any of its flags is set; a molecular batch (``cell`` ``None``) has
+    none.
+    """
+    if cell is None:
+        return torch.zeros(num_graphs, dtype=torch.bool, device=device)
+    periodic = cell.diagonal(dim1=-2, dim2=-1).abs().sum(-1) > 1e-6
+    if pbc is not None:
+        periodic = periodic & pbc.any(-1)
+    return periodic
+
+
+def smooth_size(n: float) -> int:
+    """The smallest integer of at least ``n`` (and 8) with no prime factor above 5."""
+    size = max(8, int(math.ceil(n)))
+    found = False
+    while not found:
+        rest = size
+        for prime in [2, 3, 5]:
+            while rest % prime == 0:
+                rest = rest // prime
+        found = rest == 1
+        if not found:
+            size += 1
+    return size
+
+
 class EwaldSummation(nn.Module, FastPathModule):
     """Ewald energy of a (latent) per-atom variable ``q`` (paper eqs 3-5).
 
@@ -132,6 +164,16 @@ class EwaldSummation(nn.Module, FastPathModule):
         ``n_channels``-fold over-subtraction); xnn subtracts it once. The
         two agree for 1-dimensional ``q`` and always when the flag is off.
 
+    method : str, optional
+        ``"kspace"`` (default): the reference reciprocal sum over the
+        wave-vector sphere (or its factorized fast path); ``"pme"``: the same
+        sum through a particle mesh (:meth:`reciprocal_pme`), ``N log N``
+        in the atoms, approximate to the spline aliasing error.
+    pme_order, pme_oversample : int, float, optional
+        B-spline order (8) and mesh density relative to the sphere (2.0) of
+        the mesh sum; at these defaults the energy agrees with the reference
+        sum to about 1e-7 relative and the forces and stress to about 1e-6.
+
     Notes
     -----
     Charges are in scaled units (upstream ``norm_factor = 1``): a physical
@@ -141,14 +183,22 @@ class EwaldSummation(nn.Module, FastPathModule):
     """
 
     def __init__(self, dl: float = 2.0, sigma: float = 1.0, exponent: int = 1,
-                 remove_self_interaction: bool = False):
+                 remove_self_interaction: bool = False, method: str = "kspace",
+                 pme_order: int = 8, pme_oversample: float = 2.0):
         super().__init__()
         if exponent not in (1, 6):
             raise ValueError(f"exponent must be 1 or 6, got {exponent}")
+        if method not in ("kspace", "pme"):
+            raise ValueError(f"method must be 'kspace' or 'pme', got {method!r}")
+        if pme_order < 2 or pme_oversample < 1.0:
+            raise ValueError("pme_order must be at least 2 and pme_oversample at least 1")
         self.dl = dl
         self.sigma = sigma
         self.exponent = exponent
         self.remove_self_interaction = remove_self_interaction
+        self.method = method
+        self.pme_order = int(pme_order)
+        self.pme_oversample = float(pme_oversample)
         # the factorized reciprocal sum (reciprocal_fast), chosen per evaluation
         # by the owning LatentEwald for the structures of at least
         # fast_min_atoms atoms; off under TorchScript
@@ -274,6 +324,36 @@ class EwaldSummation(nn.Module, FastPathModule):
             energy = energy - self._self_energy(q)
         return energy
 
+    def pme_mesh(self, cell: Tensor) -> List[int]:
+        """Mesh dimensions of :meth:`reciprocal_pme`: the smallest FFT-friendly
+        sizes (factors 2, 3 and 5) holding the wave-vector sphere
+        ``|k| <= 2 pi / dl`` ``pme_oversample`` times over."""
+        lengths = torch.linalg.norm(cell.detach(), dim=1)
+        mesh: List[int] = []
+        for i in range(3):
+            mesh.append(smooth_size(2.0 * self.pme_oversample * float(lengths[i]) / self.dl))
+        return mesh
+
+    def reciprocal_pme(self, pos: Tensor, q: Tensor, cell: Tensor) -> Tensor:
+        """:meth:`reciprocal` through a particle mesh (smooth PME).
+
+        The same wave vectors (the sphere ``|k| <= 2 pi / dl``) and weights,
+        with the structure factors from B-spline-spread charges on a mesh
+        (:func:`~xnn.common.models.pme.pme_weighted_sum`), so the cost grows
+        as ``N log N`` instead of ``N`` times the number of vectors. It
+        approximates the reference sum to the spline aliasing error, set by
+        ``pme_order`` and ``pme_oversample``.
+        """
+        mesh = self.pme_mesh(cell)
+        _, k2 = mesh_wavevectors(cell, mesh)
+        inside = (k2 > 0) & (k2 <= (2.0 * math.pi / self.dl) ** 2 * (1.0 + 1e-9))
+        safe = torch.where(inside, k2, torch.ones_like(k2))
+        weight = torch.where(inside, self._kfac(safe), torch.zeros_like(k2)) / cell_volume(cell)
+        energy = pme_weighted_sum(q, pos, cell, mesh, self.pme_order, weight)
+        if self.remove_self_interaction and self.exponent == 1:
+            energy = energy - self._self_energy(q)
+        return energy
+
     @torch.jit.unused
     def fast_supported(self, device: torch.device, dtype: torch.dtype) -> bool:
         """The factorized reciprocal sum runs on CUDA devices."""
@@ -318,6 +398,51 @@ class EwaldSummation(nn.Module, FastPathModule):
         if self.remove_self_interaction and self.exponent == 1:
             energy = energy - self._self_energy(q)
         return energy
+
+    @torch.jit.export
+    def coulomb_matrix(self, pos: Tensor, cell: Optional[Tensor] = None) -> Tensor:
+        """``gamma`` with ``E_lr(q) = 1/2 q^T gamma q`` for one structure.
+
+        Differentiable in ``pos`` and ``cell``. For a cluster it is the
+        ``erf(r / sqrt(2) sigma) / r`` kernel over ``2 pi`` (twice the pair
+        term of :meth:`realspace`, which sums every ordered pair over
+        ``4 pi``) plus the Gaussian self term on the diagonal; for a cell it
+        is the Hessian of :meth:`reciprocal`, ``4/V sum_k f(k) cos k.(r_i - r_j)``
+        over the half grid, with ``k = 0`` omitted. ``exponent`` must be 1.
+
+        Parameters
+        ----------
+        pos : Tensor
+            Positions ``(n, 3)`` in Angstrom.
+        cell : Tensor or None, optional
+            Row-vector cell ``(3, 3)`` for a periodic structure.
+
+        Returns
+        -------
+        Tensor
+            ``(n, n)``, symmetric positive definite.
+        """
+        if self.exponent != 1:
+            raise ValueError("the charge solve needs the Coulomb kernel (exponent=1)")
+        n = pos.shape[0]
+        eye = torch.eye(n, dtype=pos.dtype, device=pos.device)
+        self_term = 2.0 / (self.sigma * (2.0 * math.pi) ** 1.5)
+        if cell is None:
+            # the same expressions as realspace, so 1/2 q^T gamma q is its energy exactly
+            dist = torch.linalg.norm(pos[:, None, :] - pos[None, :, :], dim=-1)
+            screen = torch.special.erf(dist / (self.sigma * math.sqrt(2.0)))
+            gamma = screen / (dist + 1e-6) / (2.0 * math.pi)
+            if not self.remove_self_interaction:
+                gamma = gamma + eye * self_term
+            return gamma
+        _, kpts, k2 = self.k_set(cell)
+        weights = self._kfac(k2)                                   # (M,)
+        phase = pos @ kpts.T                                       # (n, M)
+        cos, sin = torch.cos(phase), torch.sin(phase)
+        gamma = 4.0 / cell_volume(cell) * ((cos * weights) @ cos.T + (sin * weights) @ sin.T)
+        if self.remove_self_interaction:
+            gamma = gamma - eye * self_term
+        return gamma
 
     @torch.jit.export
     def realspace(self, pos: Tensor, q: Tensor) -> Tensor:
@@ -448,9 +573,7 @@ class EwaldSummation(nn.Module, FastPathModule):
             if num_graphs == 1:
                 return self.realspace_single(pos, q).reshape(1)
             return self.realspace_batch(pos, q, batch, num_graphs)
-        periodic = cell.diagonal(dim1=-2, dim2=-1).abs().sum(-1) > 1e-6
-        if pbc is not None:
-            periodic = periodic & pbc.any(-1)
+        periodic = periodic_structures(cell, pbc, num_graphs, pos.device)
         if num_graphs == 1 and not bool(periodic[0]):
             return self.realspace_single(pos, q).reshape(1)
         # the molecular structures all at once, the periodic ones one by one
@@ -458,8 +581,11 @@ class EwaldSummation(nn.Module, FastPathModule):
         out = self.realspace_batch(pos[molecular], q[molecular], batch[molecular], num_graphs)
         for i in periodic.nonzero().flatten().tolist():
             mask = batch == i
-            use_fast = self.fast_active and int(mask.sum()) >= self.fast_min_atoms
-            reciprocal = self.reciprocal_fast if use_fast else self.reciprocal
+            if self.method == "pme":
+                reciprocal = self.reciprocal_pme
+            else:
+                use_fast = self.fast_active and int(mask.sum()) >= self.fast_min_atoms
+                reciprocal = self.reciprocal_fast if use_fast else self.reciprocal
             out = out.index_put((torch.tensor([i], device=out.device),),
                                 reciprocal(pos[mask], q[mask], cell[i]).reshape(1))
         return out
@@ -548,8 +674,23 @@ class LatentEwald(InteratomicPotential):
         Formal charges by element symbol or atomic number, by default
         :data:`~xnn.common.models.charge_solve.ION_CHARGES` (the alkali,
         alkaline-earth and halide ions).
-    dl, sigma, exponent, remove_self_interaction
-        Passed to :class:`EwaldSummation`. Note that ``dl`` acts on periodic
+    dipole_origin : str, optional
+        Origin of the ``"les_dipole"`` output: ``"com"`` (default) the
+        center of mass, ``"centroid"`` the mean position, ``"origin"`` the
+        coordinate origin. The choice only matters for charged structures.
+    dielectric : float, optional
+        Screening of the charge channel's long-range energy: its Ewald
+        energy (and, with the charge solve, its Coulomb coupling) is divided
+        by ``dielectric``, by default 1 (vacuum). Set it to the solvent's
+        constant (78.4 for water) when the labels come from a continuum
+        solvent model, so charges fitted to physical ones carry the screened
+        interaction those labels contain. The other channels are unscreened.
+    learn_dielectric : bool, optional
+        Make the dielectric a trainable parameter (its logarithm, so it stays
+        positive), starting from ``dielectric``. Off by default.
+    dl, sigma, exponent, remove_self_interaction, method, pme_order, pme_oversample
+        Passed to :class:`EwaldSummation` (``method: pme`` runs the periodic
+        sum on a particle mesh). Note that ``dl`` acts on periodic
         structures only and ``exponent = 6`` is periodic-only as well (the
         real-space branch that molecular structures take implements the
         ``1/r`` kernel), so a dataset without cells trains neither.
@@ -573,6 +714,17 @@ class LatentEwald(InteratomicPotential):
     spread uniformly over the atoms of each structure in ``"node_energy"``
     so it still sums to the total. The additional keys ``"energy_sr"``,
     ``"energy_lr"``, and ``"latent_charges"`` expose the decomposition.
+
+    ``"les_charges"`` ``(N,)`` is the channel ``charge_channel`` in e (after
+    the constraint or the charge solve) and ``"les_dipole"`` ``(B, 3)`` its
+    dipole moment ``sum_i Q_i (r_i - o)`` in e Angstrom about the
+    ``dipole_origin``, for the molecular structures (zero for periodic ones,
+    whose dipole is undefined). The loss terms ``les_charge_weight`` and
+    ``les_dipole_weight`` fit them to ``charges`` and ``dipole`` labels; the
+    keys are distinct from the ``"charges"`` / ``"dipole"`` outputs of models
+    with charges of their own. With several channels only that channel is
+    exported. Both report the charges before the dielectric screening, which
+    acts on the energy only.
     """
 
     def __init__(self, model: InteratomicPotential, n_channels: int = 4,
@@ -583,7 +735,10 @@ class LatentEwald(InteratomicPotential):
                  charge_weights: str = "uniform", charge_solve: bool = False,
                  hardness: str = "element", hardness_init: float = 10.0,
                  fragments: bool = False, bond_factor: float = 1.2,
-                 ion_charges: Optional[dict] = None):
+                 ion_charges: Optional[dict] = None, method: str = "kspace",
+                 pme_order: int = 8, pme_oversample: float = 2.0,
+                 dipole_origin: str = "com", dielectric: float = 1.0,
+                 learn_dielectric: bool = False):
         super().__init__()
         feature_dim = getattr(model, "node_feature_dim", None)
         if feature_dim is None:
@@ -629,14 +784,42 @@ class LatentEwald(InteratomicPotential):
             self.hardness_net = nn.Linear(feature_dim, 1)
             nn.init.zeros_(self.hardness_net.weight)
             nn.init.constant_(self.hardness_net.bias, raw0)
+        if dipole_origin not in ("com", "centroid", "origin"):
+            raise ValueError(
+                f"dipole_origin must be 'com', 'centroid' or 'origin', got {dipole_origin!r}")
+        self.dipole_origin = dipole_origin
+        self.register_buffer("masses", torch.tensor(ATOMIC_MASSES, dtype=torch.float64),
+                             persistent=False)
         self.fragments = bool(fragments) and bool(charge_solve)
         self.bond_factor = float(bond_factor)
         if self.fragments:
             self.register_buffer("covalent_radii", covalent_radii(), persistent=False)
             self.register_buffer("ion_charges", ion_charge_table(ion_charges), persistent=False)
         self.ewald = EwaldSummation(dl=dl, sigma=sigma, exponent=exponent,
-                                    remove_self_interaction=remove_self_interaction)
+                                    remove_self_interaction=remove_self_interaction,
+                                    method=method, pme_order=pme_order,
+                                    pme_oversample=pme_oversample)
+        if dielectric <= 0:
+            raise ValueError(f"dielectric must be positive, got {dielectric}")
+        log_eps = torch.tensor(math.log(float(dielectric)))
+        if learn_dielectric:
+            self.log_dielectric = nn.Parameter(log_eps)
+        else:
+            self.register_buffer("log_dielectric", log_eps)
         self.use_fast = "auto"
+
+    @property
+    def dielectric(self) -> Tensor:
+        """The current dielectric constant of the charge channel (a scalar tensor)."""
+        return torch.exp(self.log_dielectric)
+
+    def screened(self, q: Tensor) -> Tensor:
+        """``q`` with the charge channel divided by ``sqrt(dielectric)``, so the
+        Ewald energy of that channel is divided by the dielectric."""
+        scale = torch.ones(q.shape[1], dtype=q.dtype, device=q.device)
+        scale = scale.index_fill(0, torch.tensor([self.charge_channel], device=q.device),
+                                 torch.exp(-0.5 * self.log_dielectric).to(q.dtype))
+        return q * scale.unsqueeze(0)
 
     @torch.jit.unused
     def set_use_fast(self, use_fast) -> "LatentEwald":
@@ -684,8 +867,9 @@ class LatentEwald(InteratomicPotential):
         dict of str to torch.Tensor
             The wrapped model's outputs with ``"energy"`` and
             ``"node_energy"`` including the long-range term, plus
-            ``"energy_sr"`` ``(B,)``, ``"energy_lr"`` ``(B,)`` and
-            ``"latent_charges"`` ``(N, n_channels)``.
+            ``"energy_sr"`` ``(B,)``, ``"energy_lr"`` ``(B,)``,
+            ``"latent_charges"`` ``(N, n_channels)``, ``"les_charges"``
+            ``(N,)`` and ``"les_dipole"`` ``(B, 3)``.
         """
         if not torch.jit.is_scripting():
             self._select_fast(data)
@@ -704,11 +888,14 @@ class LatentEwald(InteratomicPotential):
         if chi is not None:
             q, node_charge_energy, mu, hardness, frag = self.solve_charges(
                 chi, q, features, data, pos, cell)
-        energy_lr = self.ewald(q, pos, data.batch, data.num_graphs, cell, data.pbc)
+        energy_lr = self.ewald(self.screened(q), pos, data.batch, data.num_graphs, cell, data.pbc)
         n_atoms = torch.bincount(data.batch, minlength=data.num_graphs)
         out["energy_sr"] = out["energy"]
         out["energy_lr"] = energy_lr
         out["latent_charges"] = q
+        charges = q[:, self.charge_channel] / LATENT_CHARGE_PER_E
+        out["les_charges"] = charges
+        out["les_dipole"] = self.dipole(charges, pos, data, cell)
         out["energy"] = out["energy"] + energy_lr
         out["node_energy"] = out["node_energy"] + (
             energy_lr / n_atoms.to(energy_lr.dtype))[data.batch]
@@ -722,6 +909,41 @@ class LatentEwald(InteratomicPotential):
             out["energy"] = out["energy"] + energy_charge
             out["node_energy"] = out["node_energy"] + node_charge_energy
         return out
+
+    def dipole(self, charges: Tensor, pos: Tensor, data: AtomicGraph,
+               cell: Optional[Tensor]) -> Tensor:
+        """Dipole moment ``sum_i Q_i (r_i - o)`` of every structure, ``(B, 3)``.
+
+        Parameters
+        ----------
+        charges : Tensor
+            Per-atom charges ``(N,)`` in e.
+        pos : Tensor
+            Positions ``(N, 3)`` in the charges' dtype.
+        data : AtomicGraph
+            The batch (structure index, atomic numbers, periodic flags).
+        cell : Tensor or None
+            The cells ``(B, 3, 3)``, or ``None`` for a molecular batch.
+
+        Returns
+        -------
+        Tensor
+            The dipole moments in e Angstrom about the ``dipole_origin``,
+            zero for periodic structures.
+        """
+        batch, num_graphs = data.batch, data.num_graphs
+        if self.dipole_origin == "com":
+            center = center_of_mass(pos, data.atomic_numbers, batch, num_graphs, self.masses)
+            r = pos - center[batch]
+        elif self.dipole_origin == "centroid":
+            n_atoms = torch.bincount(batch, minlength=num_graphs).to(pos.dtype)
+            center = scatter_sum(pos, batch, num_graphs) / n_atoms.unsqueeze(-1)
+            r = pos - center[batch]
+        else:
+            r = pos
+        mu = scatter_sum(charges.unsqueeze(-1) * r, batch, num_graphs)
+        periodic = periodic_structures(cell, data.pbc, num_graphs, pos.device)
+        return torch.where(periodic.unsqueeze(-1), torch.zeros_like(mu), mu)
 
     def hardness_of(self, features: Tensor, atomic_numbers: Tensor) -> Tensor:
         """The hardness ``J_i > 0`` of every atom, ``(N,)``, in latent units."""
@@ -762,7 +984,8 @@ class LatentEwald(InteratomicPotential):
             periodic = (cell is not None
                         and bool(cell[i].diagonal().abs().sum() > 1e-6)
                         and (data.pbc is None or bool(data.pbc[i].any())))
-            gamma = coulomb_matrix(self.ewald, pos[idx], cell[i] if periodic else None)
+            gamma = (coulomb_matrix(self.ewald, pos[idx], cell[i] if periodic else None)
+                     / self.dielectric.to(chi.dtype))
             total = data.total_charge[i].to(chi.dtype) if data.total_charge is not None else None
             if frag_all is None:
                 frag_i = None

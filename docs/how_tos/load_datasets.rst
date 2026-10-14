@@ -4,59 +4,68 @@
 Download an Upstream Dataset
 ******************************
 
-``load_dataset()`` downloads, verifies, converts and caches a benchmark
-dataset in one call. ``examples/data/load_dataset_tutorial.ipynb`` is the
-runnable version of this page.
+xnn offers a dataset hub which is a collection of popular benchamrk datasets in
+Machine Learning Interatomic Potential (MLIP) research. You can get a list of
+the available datasets with :func:`~xnn.common.data.list_datasets`. The
+``load_dataset()`` downloads, verifies, converts and caches a benchmark dataset,
+listed above in one call. The ``examples/data/load_dataset_tutorial.ipynb``
+notebook offers a runnable version of this page.
 
 .. code-block:: python
 
    from xnn.common.data import load_dataset, list_datasets
 
-   list_datasets()   # ['ani1', 'ani1ccx', 'ani1x', 'ani2x', 'argon_md', 'ethanol_response', 'hdnnp4g', 'lode_dimers', 'qm7', 'rmd17', 's22', 's66', 'spookynet_states']
+   # List the available datasets in the hub
+   list_datasets()   # ['ani1', 'ani1ccx', 'ani1x', 'ani2x', 'lode_dimers', 'qm7', 'rmd17', 's22', 's66', ...]
 
+   # Load a dataset by name and optional keyword arguments
    splits = load_dataset("rmd17", molecule="aspirin")                 # {"train": [...], "test": [...]}
-   train = load_dataset("rmd17", molecule="aspirin", split="train")   # one list of structures
+   train = load_dataset("rmd17", molecule="aspirin", split="train")   # One list of structures
    ds = load_dataset("rmd17", molecule="aspirin", cutoff=5.0)         # AtomicDataset per split
 
-Without ``split`` you get every split as a mapping of structure lists. With
-``cutoff`` each split comes back as an
+Without the ``split`` argument, you get every split available in the data as a
+mapping of structure lists. With ``cutoff``, each split comes back as an
 :class:`~xnn.common.data.dataset.AtomicDataset`, ready for the
 :class:`~xnn.common.train.trainer.Trainer` or a ``DataLoader`` with
-:func:`~xnn.common.data.dataset.collate`.
+:func:`~xnn.common.data.dataset.collate` to be subsequently used in training or
+evaluation.
 
 Dataset options
 ===============
-Each dataset takes its own keyword arguments (full list in :ref:`data`):
+Each dataset offers its own keyword arguments for more control during
+the pre-processing (see the full list in :ref:`data`):
 
 .. code-block:: python
 
-   # rMD17: ten molecules, five official folds, eV by default
+   # rMD17: ten molecules, five official folds, energies are in eV by default
    load_dataset("rmd17", molecule="ethanol", split="train", fold=3, n_train=500)
 
    # QM7: 7165 molecules with atomization energies, test fold 1 of the stratified five
    load_dataset("qm7", split="train", fold=1)
 
-   # ethanol with dipoles and polarizabilities: seeded 8000 / 1000 / 1000 split
+   # Ethanol with dipoles and polarizabilities: seeded 8000 / 1000 / 1000 split
    load_dataset("ethanol_response", split="train")
 
    # ANI-1: 20 M conformations in one archive; pick heavy-atom subsets and cap the size
    load_dataset("ani1", heavy_atoms=[2, 3, 4], max_molecules=60, max_conformations=60)
 
-   # ANI-1x (energies and forces), ANI-1ccx (coupled-cluster energies), ANI-2x (seven elements)
+   # ANI-1x (energies and forces), ANI-1ccx (coupled-cluster energies),
+   # ANI-2x (seven elements)
    load_dataset("ani1x", split="train")
    load_dataset("ani1ccx", max_molecules=50)
    load_dataset("ani2x", n_atoms=[3, 4], max_conformations=200)
 
-   # the 4G-HDNNP benchmarks with Hirshfeld charges: carbon_chain, ag_clusters, nacl_clusters, au2_mgo
+   # The 4G-HDNNP benchmarks with Hirshfeld charges: carbon_chain, ag_clusters, 
+   # nacl_clusters, au2_mgo
    load_dataset("hdnnp4g", system="ag_clusters", split="all")
 
-   # the same geometries in two charge or spin states (SpookyNet): ag3 or carbene
+   # The same geometries in two charge or spin states (the SpookyNet set): ag3 or carbene
    load_dataset("spookynet_states", system="carbene", split="train")
 
    # Argon MD: periodic frames with stress, bundled with the repository
    load_dataset("argon_md", split="train", cutoff=6.0)
 
-   # LODE dimers: binding curves with per-frame metadata
+   # LODE dimers: binding energy curves with per-frame metadata
    cc = load_dataset("lode_dimers", subset="bio", label="CC", split="all", return_info=True)
    binding = cc[0]["energy"] - cc[0]["info"]["energyA"] - cc[0]["info"]["energyB"]
 
@@ -64,19 +73,20 @@ Each dataset takes its own keyword arguments (full list in :ref:`data`):
    dimers = load_dataset("s66", split="all")
    dimers[0]["fragment"], dimers[0]["interaction_energy"]       # per-atom 0 / 1, kcal/mol
 
-The ANI sets need the ``hub`` extra (``h5py``). The ``split`` of the ANI sets
-(``train`` / ``val`` / ``test``) is the paper's per-molecule 80/10/10
-partition.
+Accessing the ANI sets requires installing the ``hub`` extra optional dependency
+(``h5py``). The ``split`` of the ANI sets (``train`` / ``val`` / ``test``) is
+based on their original paper's per-molecule 80/10/10 partition.
 
-Where the files go
-==================
-Downloads land under ``datasets/<name>/`` in the repository. Change that per
-call with ``cache_dir`` or globally with the ``XNN_DATASETS`` (or
-``XNN_CACHE``) environment variable:
+Where the files go?
+===================
+The downloaded files land under ``datasets/<name>/`` within the repository. You
+can change this behavior per call by setting the ``cache_dir`` argument or
+system-wide by setting the environment variables ``XNN_DATASETS`` or ``XNN_CACHE``:
 
 .. code-block:: python
 
    load_dataset("rmd17", molecule="aspirin", cache_dir="/scratch/data")
 
-A cached dataset loads again instantly and offline. To register a dataset of
-your own, see :ref:`developer-guide-extending`.
+Subsequent calls will read the cached dataset instantly and in the offline mode.
+To register a dataset of your own, see the :ref:`developer-guide-extending`
+guide.

@@ -105,7 +105,9 @@ def bonded_fragments(atomic_numbers: Tensor, edge_index: Tensor, edge_vec: Tenso
         if torch.equal(new, labels):
             break
         labels = new
-    return torch.unique(labels, return_inverse=True)[1]
+    # the root of every component, numbered in order (scriptable renumbering)
+    roots = torch.zeros(n, dtype=torch.long, device=z.device).index_fill(0, labels, 1)
+    return (torch.cumsum(roots, 0) - 1)[labels]
 
 
 def fragment_targets(fragments: Tensor, atomic_numbers: Tensor, ions: Tensor,
@@ -147,14 +149,8 @@ def fragment_targets(fragments: Tensor, atomic_numbers: Tensor, ions: Tensor,
 
 
 def coulomb_matrix(ewald, pos: Tensor, cell: Optional[Tensor] = None) -> Tensor:
-    """``gamma`` with ``E_lr(q) = 1/2 q^T gamma q`` for one structure.
-
-    Differentiable in ``pos`` and ``cell``. For a cluster it is the
-    ``erf(r / sqrt(2) sigma) / r`` kernel over ``2 pi`` (twice the pair term of
-    :meth:`EwaldSummation.realspace`, which sums every ordered pair over
-    ``4 pi``) plus the Gaussian self term on the diagonal; for a cell it is the
-    Hessian of :meth:`EwaldSummation.reciprocal`, ``4/V sum_k f(k) cos k.(r_i - r_j)``
-    over the half grid, with ``k = 0`` omitted.
+    """``gamma`` with ``E_lr(q) = 1/2 q^T gamma q`` for one structure
+    (:meth:`~xnn.common.models.les.EwaldSummation.coulomb_matrix` of ``ewald``).
 
     Parameters
     ----------
@@ -170,27 +166,7 @@ def coulomb_matrix(ewald, pos: Tensor, cell: Optional[Tensor] = None) -> Tensor:
     Tensor
         ``(n, n)``, symmetric positive definite.
     """
-    if ewald.exponent != 1:
-        raise ValueError("the charge solve needs the Coulomb kernel (exponent=1)")
-    n = pos.shape[0]
-    eye = torch.eye(n, dtype=pos.dtype, device=pos.device)
-    self_term = 2.0 / (ewald.sigma * (2.0 * math.pi) ** 1.5)
-    if cell is None:
-        # the same expressions as realspace, so 1/2 q^T gamma q is its energy exactly
-        dist = torch.linalg.norm(pos[:, None, :] - pos[None, :, :], dim=-1)
-        screen = torch.special.erf(dist / (ewald.sigma * math.sqrt(2.0)))
-        gamma = screen / (dist + 1e-6) / (2.0 * math.pi)
-        if not ewald.remove_self_interaction:
-            gamma = gamma + eye * self_term
-        return gamma
-    _, kpts, k2 = ewald.k_set(cell)
-    weights = ewald._kfac(k2)                                  # (M,)
-    phase = pos @ kpts.T                                       # (n, M)
-    cos, sin = torch.cos(phase), torch.sin(phase)
-    gamma = 4.0 / cell_volume(cell) * ((cos * weights) @ cos.T + (sin * weights) @ sin.T)
-    if ewald.remove_self_interaction:
-        gamma = gamma - eye * self_term
-    return gamma
+    return ewald.coulomb_matrix(pos, cell)
 
 
 def gaussian_coulomb_matrix(pos: Tensor, sigma: Tensor, cell: Optional[Tensor] = None,

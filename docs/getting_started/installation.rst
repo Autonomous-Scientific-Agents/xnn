@@ -4,14 +4,16 @@
 Installation
 ************
 
-xnn needs Python 3.10 or later. The core package depends on ``torch``
-(2.0 or newer), ``numpy``, ``pyyaml`` and ``tqdm``; everything else is an
-optional extra.
+xnn needs Python 3.10 or later. The core package depends on ``torch`` (2.0 or
+newer), ``numpy``, ``pyyaml`` and ``tqdm``. Everything else can be added based
+on your need as an extra optional dependency.
 
 From PyPI
 =========
-The distribution is called ``xnns``; the import package and the command line
-are ``xnn``:
+The distribution currently uses the label, ``xnns`` (we have an open `PEP 541
+<https://github.com/pypi/support/issues/12316>`_ issue to be able to claim the
+stale PyPI repo, ``xnn``). Regardless, the import package and the command line
+use the ``xnn`` label:
 
 .. code-block:: bash
 
@@ -21,6 +23,9 @@ are ``xnn``:
 From source
 ===========
 
+To get the latest development version, clone the GitHub repository and install
+with
+
 .. code-block:: bash
 
    git clone https://github.com/molssi-ai/xnn.git
@@ -29,7 +34,8 @@ From source
 
 Extras
 ======
-Install only what you need:
+
+xnn gives you the ability to install only what you need:
 
 .. code-block:: bash
 
@@ -47,12 +53,14 @@ Install only what you need:
    pip install "xnns[all]"          # gnn, ase, vesin, hydra, tensorboard, dev and examples
 
 The parity notebooks and tests compare against reference packages, which have
-their own extras: ``ani`` (torchani), ``d3`` (simple-dftd3), ``d4`` (dftd4)
-and ``opls`` (OpenMM). The ``examples`` extra pins ``mace-torch`` and
-``nequip``, which pin ``e3nn==0.4.4``; xnn runs on that version.
+their own extra optional dependencies: ``ani`` (torchani), ``d3``
+(simple-dftd3), ``d4`` (dftd4) and ``opls`` (OpenMM). The ``examples`` extra
+pins ``mace-torch`` and ``nequip``, which pin ``e3nn==0.4.4``. xnn runs on that
+version.
 
-The fused GPU kernels (:ref:`howto-fast-paths`) are not an extra. They need a
-CUDA 12.6 or newer PyTorch build and are installed by hand:
+The fused GPU kernels (:ref:`howto-fast-paths`) are not considered extra
+optional dependencies. They need a CUDA 12.6 or newer PyTorch build and are
+installed manually by the user:
 
 .. code-block:: bash
 
@@ -60,9 +68,9 @@ CUDA 12.6 or newer PyTorch build and are installed by hand:
 
 GPU environment with uv
 =======================
-``pyproject.toml`` carries a `uv <https://docs.astral.sh/uv/>`_ configuration
-that reproduces the environment the example notebooks were built in
-(``torch 2.5.1+cu121``):
+The ``pyproject.toml`` carries a `uv <https://docs.astral.sh/uv/>`_
+configuration that reproduces the environment the example notebooks were built
+in (``torch 2.5.1+cu121``):
 
 .. code-block:: bash
 
@@ -70,6 +78,9 @@ that reproduces the environment the example notebooks were built in
 
 Check the installation
 ======================
+
+You can check the installation by running the following Python snippet. It
+prints the xnn version and the list of available models. 
 
 .. code-block:: python
 
@@ -82,4 +93,5 @@ Check the installation
    #  'hdnnp', 'mace', 'nequip', 'opls', 'physnet', 'reaxff', 'schnet', 'se3cnn']
 
 The e3nn-based models (NequIP, MACE, Allegro, the SE(3) steerable CNN) only
-appear when the ``gnn`` extra is installed. The test suite runs with ``pytest tests/`` (``dev`` extra).
+appear when the ``gnn`` extra is installed. The test suite runs with ``pytest
+tests/`` (``dev`` extra).
