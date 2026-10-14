@@ -5,9 +5,10 @@ Weight Energy and Force Labels
 ******************************
 
 A large cluster cut from a bulk snapshot is cheaper to label than the periodic
-cell, but only its buried atoms see a bulk-like environment. Per-atom force
-weights train on those atoms and keep the rest as environment, and term
-weights decide whether the cluster's energy counts.
+cell. However, only the buried atoms in the cluster see a bulk-like environment.
+In this case, the per-atom force weights train on those atoms and keep the rest
+as environment, while the term weights decide whether the cluster's energy
+counts.
 
 The weights
 ===========
