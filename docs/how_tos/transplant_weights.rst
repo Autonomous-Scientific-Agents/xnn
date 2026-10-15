@@ -4,27 +4,34 @@
 Transplant Weights from Upstream Codes
 **************************************
 
-Every xnn model with a reference implementation loads that code's weights and
-reproduces its energies and forces to round-off. That is how the
-implementations are verified (:ref:`fidelity`), and it is how a model trained
-elsewhere comes into xnn, or goes back.
+Every xnn model with a reference implementation loads the original code's
+weights and reproduces its energies and forces to round-off error. That is how
+the xnn implementations are verified (:ref:`fidelity`), and it is how a model
+trained elsewhere comes into xnn.
 
 Published checkpoints need no transplant
 ========================================
-The MACE and AIMNet2 foundation models convert in one call, and torchani's
-ANI ensembles load through presets:
+The MACE and AIMNet2 pre-trained foundation models are offered by their
+developers. They can be converted into xnn models in one call. Ensemble models
+such as torchani's ANI can load through presets:
 
 .. code-block:: python
 
    from xnn.common.models import from_pretrained
    from xnn.dnn.models import ANI
 
+   # Load pretrained models (MACE and AIMNet2)
    mace = from_pretrained("mace-off23-small")
    aim = from_pretrained("aimnet2")
+
+   # Load the ANI-2x model and its ensemble of 8 networks
    ani = ANI.ani2x()
 
-See :ref:`howto-pretrained-models`. A RuNNer model directory (``input.nn``
-with the weights and scaling files of a 2G, 3G or 4G HDNNP) loads directly:
+See :ref:`howto-pretrained-models` for more information. 
+
+A `RuNNer <https://gitlab.com/runner-suite/runner2>`_ model directory
+(``input.nn`` with the weights and scaling files of a 2G, 3G or 4G HDNNP) can
+also be loaded directly into xnn:
 
 .. code-block:: python
 
@@ -32,48 +39,29 @@ with the weights and scaling files of a 2G, 3G or 4G HDNNP) loads directly:
 
    model = load_runner_model("runner_model/")
 
-The pattern for anything else
-=============================
+The pattern for using external upstream weights
+===============================================
 1. Build the xnn model with the upstream hyperparameters (cutoff, angular
    order, channels, layers, radial basis, average neighbors, per-species
-   energies and scales).
-2. Rename the upstream state dict to the xnn parameter names.
-3. Load it and compare on a batch:
+   energies and scales),
+2. Rename the upstream state dict to the xnn parameter names,
+3. Load it and compare on a batch of datapoints to verify that the energies,
+   forces or other target properties match the reference code's outputs. The
+   following example shows the transplant for a MACE model trained in the
+   original code and verified in xnn:
 
 .. code-block:: python
 
+   # Load the reference model and its weights
    missing, unexpected = model.load_state_dict(mapped_state, strict=False)
+
+   # Check that all parameters were found and no unexpected ones were present
    assert not missing and not unexpected
+
+   # Compare the energies on a batch of datapoints to verify that the transplant
+   # worked correctly
    torch.testing.assert_close(model(batch)["energy"], reference_energy)
 
-The same map applied in reverse loads xnn-trained weights into the reference
-code. Each ``examples/fidelity_checks/<model>_verification`` notebook ends
-with the transplant for its model; the notes per model:
-
-- **MACE, BAMBOO, CACE**: a plain name map. CACE initializes some layers
-  lazily, so run one upstream forward pass before reading its state dict.
-- **NequIP, Allegro**: parameter names already match; the state dict loads
-  nearly as is.
-- **PhysNet**: crosses frameworks; each TensorFlow variable is copied as a
-  NumPy array. ``dnn/physnet/physnet_argon_density_md`` shows the reverse
-  direction, xnn weights back into the original graph.
-- **DimeNet, DimeNet++**: crosses frameworks like PhysNet. The reference
-  code folds basis constants and an angle convention into its weights, so
-  the map rescales the basis layers and the model takes
-  ``reference_basis=True``; ``tests/dimenet_tf_parity.py`` holds the map and
-  applies it to random weights and to the published DimeNet++ QM9 model.
-- **GemNet**: same framework; the map permutes the shared basis projections
-  and bilinear weights, reorders the spherical-harmonic orders and shifts
-  the atom embeddings to index by ``Z``. ``tests/gemnet_parity.py`` holds it
-  and applies it to random weights of all variants and to the published
-  GemNet-Q and GemNet-T weights.
-- **LES**: the upstream latent-charge head and Ewald settings map into
-  ``LatentEwald(CACE)``.
-- **SchNet**: a clean-room build from the paper, verified against an
-  independent NumPy implementation; nothing to transplant.
-- **ReaxFF, OPLS, DREIDING**: no weights. Their parameters are ``.frc``
-  files, read directly and written back with ``export_library()``
-  (:ref:`howto-forcefield-files`).
-
-The test suite repeats the parity check whenever the reference package is
-installed.
+The same method can be applied in reverse to load xnn-trained weights into the
+reference code. Each ``examples/fidelity_checks/<model>_verification`` notebook
+ends with the transplant for its original model.

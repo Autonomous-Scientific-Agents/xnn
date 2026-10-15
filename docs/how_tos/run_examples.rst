@@ -4,12 +4,19 @@
 Run the Example Notebooks
 *************************
 
-The notebooks under ``examples/`` train, deploy and verify every model. They
-are committed with their outputs and rendered in :ref:`examples`, so read
-them there first; this page is about running them yourself.
+The example notebooks live under ``examples/`` folder and cover training,
+fine-tuning and deployment and verification of every xnn model. The notebooks
+are committed with their outputs and rendered in :ref:`examples`, so you can
+read them there first. The details on this page is about running them on your
+own machine.
 
-Install and launch
-==================
+Launching the examples
+======================
+You can run the notebooks in a Python environment with xnn and the ``examples``
+extra dependency installed. The following command installs the extra dependency
+and launches a Jupyter Lab server in the ``examples/`` folder. The notebooks
+will run in the environment where xnn is installed, so you can use your own
+Python environment or a virtual one.
 
 .. code-block:: bash
 
@@ -17,66 +24,108 @@ Install and launch
    jupyter lab examples/
 
 Every training and MD notebook loads its data through the data hub
-(:ref:`howto-load-datasets`). The argon set is bundled; the others download
-on first use.
+(:ref:`howto-load-datasets`). The argon dataset is bundled and shipped with the
+package. Other datasets are downloaded and cached on their first use.
 
-What is where
-=============
-- ``examples/data``, ``examples/models``: the data hub and the model hub
-  tutorials.
-- ``examples/gnn/<model>``: for MACE, NequIP, Allegro and CACE a train/test
-  notebook and an argon NPT density notebook, each against the reference
-  code; MACE and AIMNet2 add foundation-model and fine-tuning notebooks;
-  SchNet trains on rMD17, then runs NVE dynamics; DimeNet checks its paper and
-  trains on rMD17 against SchNet; GemNet checks its paper and trains GemNet-T,
-  -Q and -dT on rMD17; PaiNN checks its paper, reproduces its MD17
-  tables, the ferrocene rotation profiles and the ethanol IR and Raman spectra; LES shows long-range binding curves.
-- ``examples/cnn/se3cnn``: the Tetris experiment of the SE(3) steerable CNN
-  paper, then steerable against conventional 3D CNN potentials on rMD17
-  under rotations.
-- ``examples/cnn/s2cnn``: the QM7 atomization-energy experiment of the
-  spherical CNN paper.
-- ``examples/dnn``: ANI (rMD17 and the four published ANI datasets),
-  PhysNet (against the original) and the HDNNP generations (paper checks,
-  1G against 2G on rMD17, and the 2G / 3G / 4G benchmarks of the
-  fourth-generation paper).
-- ``examples/hybrid``, ``examples/ffnn``: BAMBOO charges and electrostatics;
-  SpookyNet checks its paper and reproduces its electronic-state, nonlocal and
-  charge-transfer examples and MD17;
-  ReaxFF, OPLS and DREIDING training, refits and conformational energetics.
-- ``examples/common``: DFT-D3 and DFT-D4 paper reproductions, benchmarks and
-  a large-system study.
-- ``examples/benchmark``, ``examples/deploy``: one config scoring four
-  models on argon; a checkpoint served as an MDI engine, driven from Python
-  and from LAMMPS.
-- ``examples/fidelity_checks``, ``examples/parity_checks``: one notebook per
-  model against its upstream code, and the fast paths against the
-  reference.
+What is where?
+==============
+- The ``examples/data`` and ``examples/models`` folders focus on the data hub
+  and the model hub tutorials.
+- The ``examples/gnn/<model>`` folders:
+    - MACE, NequIP, Allegro and CACE offer a train/test notebook and an argon
+      NPT density notebook, each compares the performance of the model against
+      the reference code. 
+    - MACE and AIMNet2 add their foundation-models to the experiments and
+      provide a fine-tuning notebook.
+    - SchNet trains on rMD17, then runs a NVE dynamics. 
+    - DimeNet checks its performance against the tests in its original paper and
+      trains on rMD17 while comparing its results against those of SchNet. 
+    - GemNet attempts to reproduce some of the experiments in its original paper and trains GemNet-T, -Q and -dT
+      on the rMD17 data.
+    - PaiNN checks its paper, reproduces its MD17 tables, the ferrocene rotation
+      profiles and the ethanol IR and Raman spectra. 
+    - LES creates several long-range binding curves for dimers.
+- The ``examples/cnn/se3cnn`` folder provides the Tetris experiment of the SE(3)
+  steerable CNN paper, then compares its performance against that of
+  conventional 3D CNN potentials, trained on rMD17 under rotations.
+- The ``examples/cnn/s2cnn`` folder focuses on the QM7 atomization-energy
+  experiment of the spherical CNN paper.
+- The ``examples/dnn`` folder contains:
+    - the ANI experiments (training on rMD17 and the four published ANI
+      datasets),
+    - the PhysNet experiments and comparing the performance of the trained model
+      against that in the original manuscript, and
+    - the HDNNP generations (paper experiment checks, comparing the performance of 1G
+      against 2G on rMD17, and attempting to reproduce the 2G / 3G / 4G
+      benchmarks of the fourth-generation paper).
+- The ``examples/hybrid``, and ``examples/ffnn`` folders focus on:
+    - experiments involving BAMBOO charges and electrostatics,
+    - reproducing experiments in the SpookyNet paper and reproducing its
+      electronic-state, nonlocal and charge-transfer examples as well as MD17
+      dataset training, and
+    - ReaxFF, OPLS and DREIDING trainings, refits and conformational energetics.
+- The ``examples/common`` folder involves examples focusing on the DFT-D3 and
+  DFT-D4 paper experiment reproductions, benchmarks and a large-system studies.
+- The ``examples/benchmark``, and ``examples/deploy`` folders use one config
+  file for scoring four models on the argon dataset. Here, a checkpoint served
+  as an MDI engine, driven from Python and from LAMMPS.
+- The ``examples/fidelity_checks``, and ``examples/parity_checks`` folders
+  provide one notebook per model and compare them against their upstream
+  counterparts, and use the fast paths against the reference implementation in
+  xnn.
 
 Extra requirements
 ==================
-Most notebooks run with the ``examples`` extra. The exceptions:
+Most notebooks run with the ``examples`` extra. The exceptions are:
 
-- ``allegro_verification``: ``pip install "git+https://github.com/mir-group/allegro@v0.3.0"``
-- ``cace_verification`` and ``gnn/cace/*``: ``pip install git+https://github.com/BingqingCheng/cace``
-- ``ani_verification``: the ``ani`` extra
-- ``aimnet2_verification``: ``pip install aimnet`` in a separate environment
-  (it needs torch 2.8 or newer)
-- ``dnn/physnet/*``, ``physnet_verification``: an environment with both
-  TensorFlow and torch; the original PhysNet is cloned on demand
-- ``opls_verification``: the ``opls`` extra (OpenMM)
-- ``common/d4/*``, ``d4_verification``: the ``d4`` extra; the paper examples
-  also need ``rdkit``, the large-scale notebook the ``vesin`` extra and a GPU
-  with tens of GB of memory
-- ``common/d3/*``, ``d3_verification``: the ``d3`` extra
-- ``deploy/mdi_argon_md``: the ``mdi`` extra; ``mdi_argon_lammps`` also needs
-  a LAMMPS built with the MDI package, found as ``lmp`` on ``PATH`` or
-  through ``XNN_LMP``
+- The ``allegro_verification`` notebook. You need to run:
 
-Good to know
-============
-- ``schnet_ethanol_md`` loads the checkpoint written by ``schnet_rmd17_train``.
-- The MDI library initializes once per process: restart the kernel before
-  re-running ``mdi_argon_md``.
-- The D4 notebooks import ``dftd4`` before ``torch``; the wheel's OpenMP
+  .. code-block:: bash
+
+    pip install "git+https://github.com/mir-group/allegro@v0.3.0"
+
+  to get the Allegro reference code installed.
+
+- The ``cace_verification`` and ``gnn/cace/*`` notebooks. You need to run:
+
+  .. code-block:: bash
+
+    pip install pip install git+https://github.com/BingqingCheng/cace
+
+  to have the CACE reference code installed.
+
+- The ``ani_verification`` notebook which requires the installation of ``ani``
+  extra dependency.
+- The ``aimnet2_verification`` notebook. You should run
+
+  .. code-block:: bash
+
+    pip install aimnet 
+
+  in a separate environment (it needs torch 2.8 or newer).
+- The ``dnn/physnet/*`` and ``physnet_verification`` notebooks require an
+  environment with both TensorFlow and torch installed. The original PhysNet is
+  cloned on demand.
+- The ``opls_verification`` notebooks uses the ``opls`` extra dependency
+  (and OpenMM).
+- The ``common/d4/*`` and ``d4_verification`` notebooks use the ``d4`` extra
+  dependency. The paper examples also need the ``rdkit`` extra dependency. The
+  large-scale experiment notebook requires the ``vesin`` extra dependency to be
+  able to calculate the neighborlists efficiently and a GPU with tens of GBs of
+  memory.
+- The ``common/d3/*`` and ``d3_verification`` notebooks use the ``d3`` extra
+  dependency.
+- The ``deploy/mdi_argon_md`` notebook uses the ``mdi`` extra dependency. The
+  ``mdi_argon_lammps`` notebook also needs a LAMMPS installation, built with the
+  MDI package, found as ``lmp`` on ``PATH`` or through ``XNN_LMP`` environment
+  variables.
+
+Important notes
+===============
+- The ``schnet_ethanol_md`` example notebook loads the checkpoint written by the
+  ``schnet_rmd17_train`` notebook. You need to run the latter notebook first to
+  generate the checkpoint.
+- The MDI library initializes once per process. So, you should restart the
+  kernel before re-running ``mdi_argon_md``.
+- The D4 notebooks import ``dftd4`` before ``torch``. The wheel's OpenMP
   runtime returns wrong charges once torch's thread pool is active.
