@@ -4,10 +4,10 @@
 Data Pipeline
 *************
 
-AtomicGraph: the one data object
+AtomicGraph: the data interface
 ================================
-Every model consumes an :class:`~xnn.common.data.atomic_data.AtomicGraph`,
-a dataclass holding one structure or a batch:
+Every model consumes an :class:`~xnn.common.data.atomic_data.AtomicGraph`, a
+dataclass object holding one structure or a batch of structures.
 
 .. code-block:: python
 
@@ -15,10 +15,10 @@ a dataclass holding one structure or a batch:
    graph.atomic_numbers   # (N,)
    graph.edge_index       # (2, E) neighbor pairs [src, dst] within the cutoff
    graph.cell_shifts      # (E, 3) integer periodic image shift per edge
-   graph.batch            # (N,)   structure index per atom
+   graph.batch            # (N,) structure index per atom
    graph.n_atoms          # (B,)
    graph.cell, graph.pbc  # (B, 3, 3), (B, 3); None for molecules
-   graph.energy, graph.forces, graph.stress        # targets, optional
+   graph.energy, graph.forces, graph.stress        # Targets, optional
    graph.dipole, graph.polarizability              # (B, 3), (B, 3, 3) targets, optional
    graph.charges                                   # (N,) partial-charge targets, optional
    graph.total_charge, graph.spin_multiplicity     # (B,), optional; neutral / closed shell if None
@@ -26,16 +26,17 @@ a dataclass holding one structure or a batch:
    graph.energy_weight, graph.force_weight, graph.stress_weight   # (B,) term weights, optional
    graph.atom_force_weight                         # (N,) per-atom force weight, optional
 
-:meth:`~xnn.common.data.atomic_data.AtomicGraph.edge_vectors` computes
-``pos[dst] - pos[src] + cell_shift @ cell`` differentiably, which is where
-periodicity lives: models never see the difference between a molecule and a
-crystal, and forces and stress follow by autograd.
+The :meth:`~xnn.common.data.atomic_data.AtomicGraph.edge_vectors` method
+computes ``pos[dst] - pos[src] + cell_shift @ cell`` differentiably, which is
+where periodicity is realized. From models' point of view, there is no
+difference between a molecule and a crystal, especially when forces and stresses
+are computed by autograd.
 
 Structure dictionaries
 ======================
 .. _structure-dicts:
 
-The input format is a plain dictionary per structure:
+The input format is a plain dictionary representing each **structure**:
 
 .. code-block:: python
 
@@ -43,16 +44,16 @@ The input format is a plain dictionary per structure:
        "pos": ...,                # (N, 3), required
        "atomic_numbers": ...,     # (N,),   required
        "cell": ..., "pbc": ...,   # (3, 3), (3,): periodic systems
-       "energy": ...,             # scalar target
+       "energy": ...,             # Scalar target
        "forces": ...,             # (N, 3) target
        "stress": ...,             # (3, 3) target
        "dipole": ...,             # (3,) target, e Angstrom; optional
        "polarizability": ...,     # (3, 3) target, Angstrom^3; optional
        "charges": ...,            # (N,) partial charges, e; optional (HDNNP 3G / 4G)
-       "total_charge": 0.0,       # or "charge"; optional
-       "spin_multiplicity": 1,    # optional
-       "weight": 1.0,             # per-structure loss weight, optional
-       "energy_weight": 1.0,      # or force_weight / stress_weight: one term only, optional
+       "total_charge": 0.0,       # Or "charge"; optional
+       "spin_multiplicity": 1,    # Optional
+       "weight": 1.0,             # Per-structure loss weight, optional
+       "energy_weight": 1.0,      # Or force_weight / stress_weight: one term only, optional
        "atom_force_weight": ...,  # (N,) weight of each atom's force error, optional
    }
 
@@ -60,43 +61,45 @@ The weights are explained in :ref:`howto-weight-force-labels`.
 
 Datasets and batching
 =====================
-:class:`~xnn.common.data.dataset.AtomicDataset` converts each dictionary to
-a graph at a cutoff and caches it. :func:`~xnn.common.data.dataset.collate`
-concatenates graphs into one batched graph, which the trainer uses as its
-``collate_fn``:
+The :class:`~xnn.common.data.dataset.AtomicDataset` class converts each
+structure dictionary to a graph with a cutoff radius and caches it. The
+:func:`~xnn.common.data.dataset.collate` function concatenates these graphs into
+one batched graph structure, which the trainer can use as its ``collate_fn``:
 
 .. code-block:: python
 
    from xnn.common.data import AtomicDataset, collate
 
    ds = AtomicDataset(structures, cutoff=5.0)
-   batch = collate([ds[0], ds[1], ds[2]])     # one AtomicGraph holding 3 structures
+   batch = collate([ds[0], ds[1], ds[2]])     # One AtomicGraph holding 3 structures
 
-A batch may mix molecules and cells, and structures with and without energy,
-force, stress, dipole or charge labels: the missing labels are masked out of
-the loss.
+A graph batch may mix molecules and cells, and structures with and without
+energy, force, stress, dipole or charge labels. The missing labels are masked
+out of the loss, automatically. 
 
-Files
-=====
-Any format ASE can read loads in one line (``ase`` extra). Energies, forces
-and stress are picked up from the frames; stress is converted from Voigt to
-a full matrix:
+Data files
+==========
+Any ASE-native file format can be loaded into xnn in one line (the ``ase`` extra
+dependency is required). Energies, forces and stresses are picked up from the
+frames if present. The stress is converted from Voigt to a full matrix form
 
 .. code-block:: python
 
    ds = AtomicDataset.from_file("trajectory.extxyz", cutoff=5.0)
    ds = AtomicDataset.from_file("dft.extxyz", cutoff=5.0,
-                                energy_key="REF_energy", forces_key="REF_forces")   # other key names
+                                energy_key="REF_energy", 
+                                forces_key="REF_forces")   # Non-default key names
    ds = AtomicDataset.from_atoms(list_of_atoms, cutoff=5.0)
 
-Positions need not be wrapped into the cell. The converters
+The atomic positions do need not be wrapped into a cell. The converters
 :func:`~xnn.common.data.ase_io.load_structures` and
-:func:`~xnn.common.data.ase_io.atoms_to_structure` are public as well;
-per-atom ``charges`` are read from ``atoms.arrays["charges"]``, the loss
-weights ``weight`` / ``energy_weight`` / ``force_weight`` / ``stress_weight``
-from ``atoms.info`` and ``atom_force_weight`` from ``atoms.arrays``.
+:func:`~xnn.common.data.ase_io.atoms_to_structure` are public and can be used.
+Per-atom ``charges`` are read from ``atoms.arrays["charges"]``. The loss weights
+``weight``, ``energy_weight``, ``force_weight``, ``stress_weight`` can be read
+from the ``atoms.info`` and the ``atom_force_weight`` from ``atoms.arrays`` from
+the atomic frames in the same way.
 
-RuNNer ``input.data`` files (bohr, hartree) read into structure dictionaries
+RuNNer ``input.data`` files (bohr, hartree) are read into structure dictionaries
 in Angstrom and eV, with reference charges and the total charge:
 
 .. code-block:: python
@@ -108,7 +111,7 @@ in Angstrom and eV, with reference charges and the total charge:
 
 Neighbor lists
 ==============
-:func:`~xnn.common.data.neighborlist.build_neighbor_list` builds the edges
+The :func:`~xnn.common.data.neighborlist.build_neighbor_list` builds the edges
 and image shifts for molecular and periodic structures alike:
 
 .. code-block:: python
@@ -117,22 +120,31 @@ and image shifts for molecular and periodic structures alike:
 
    edge_index, cell_shifts = build_neighbor_list(pos, 5.0, cell=cell, pbc=pbc)
 
-The built-in implementation is brute force and quadratic in the atom count.
-With the ``vesin`` extra installed its cell list is used automatically, with
-the same edges and conventions; on 5000 atoms at a 6 Å cutoff that is a
-thousandfold faster. Geometry is kept in float64 whatever the model dtype.
+The built-in implementation is brute-force and quadratic in the atom count. With
+the ``vesin`` extra dependency installed, the cell list functionality is used
+automatically, with the same edges and conventions. On a system of 5000 atoms at
+a 6 Å cutoff radius, this implementation becomes a thousandfold faster. The
+geometry is kept in float64 regardless of the model dtype is to avoid numerical
+issues.
 
 The data hub
 ============
-Standard benchmark datasets download, convert and cache in one call:
+Some of the popular standard benchmark datasets can be downloaded, converted to
+xnn-native formats and cached in one call:
 
 .. code-block:: python
 
    from xnn.common.data import load_dataset, list_datasets
 
+   # List the available datasets and their options
    list_datasets()
-   splits = load_dataset("rmd17", molecule="aspirin")                      # {"train": [...], "test": [...]}
-   train = load_dataset("rmd17", molecule="aspirin", split="train", cutoff=5.0)   # AtomicDataset
+
+   # Load the RMD17 aspirin dataset, with the default split and cutoff
+   # All splits returned: {"train": [...], "test": [...]}
+   splits = load_dataset("rmd17", molecule="aspirin")
+
+   # Load the training split as an AtomicDataset with a 5 Å cutoff
+   train = load_dataset("rmd17", molecule="aspirin", split="train", cutoff=5.0)
 
 - ``rmd17``: revised MD17, ten molecules with PBE energies and forces.
   Options ``molecule``, ``fold`` (1 to 5), ``split``, ``units`` (``eV`` or
