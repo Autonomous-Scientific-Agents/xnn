@@ -1,12 +1,15 @@
 .. _howto-upstream-configs:
 
-***********************************
-Reuse Upstream MACE/NequIP Configs
-***********************************
+***********************
+Reuse Upstream Configs
+***********************
 
-Model keys copied from an upstream YAML work as they are. A per-model
-translation table (:mod:`xnn.common.config.translate`) rewrites the foreign
-spellings to the xnn names when the config loads:
+xnn allows automatic translation of config keywords from various upstream YAML
+files. A per-model translation table (:mod:`xnn.common.config.translate`)
+converts the foreign keys into their xnn-native counterparts when the config
+file loads. Below, we show two examples from MACE and NequIP configs where the
+keys from the upstream models are translated into xnn-native spellings (shown in
+comments).
 
 .. code-block:: yaml
 
@@ -26,21 +29,16 @@ spellings to the xnn names when the config loads:
      num_features: 32           # -> n_features
      chemical_symbols: [Ar]     # -> species
 
-CACE's constructor keywords (``zs``, ``num_message_passing``,
-``type_message_passing``), schnetpack's SchNet keys (``n_atom_basis``,
-``n_gaussians``, ``atomref``) and the DimeNet keys (``emb_size``,
-``num_blocks``, ``num_radial``, ``num_spherical``, ``int_emb_size``,
-``out_emb_size``), the GemNet ``model_kwargs`` (``emb_size_atom``,
-``emb_size_edge``, ``emb_size_trip``, ``num_atom``, ``triplets_only``,
-``envelope_exponent``, ``scale_file``, ...) and the RuNNer ``input.nn`` names of the HDNNP options
-(``nnp_generation``, ``elements``, ``atom_energy``, ``default_nodes``,
-``default_activation_nn``) translate the same way. When both spellings
-appear, the xnn one wins. Values are coerced too: per-species energies can be
-a list, a ``{Z: E0}`` mapping or a string, and ``species`` accepts symbols
-or numbers.
+In cases where the key spellings of the same variable from both xnn and an
+upstream model collide, the xnn one wins. Values are coerced too: per-species
+energies can be a list, a ``{Z: E0}`` mapping or a string, and ``species``
+accepts symbols or numbers.
 
-Add a table
-===========
+Extend xnn's translation table
+==============================
+
+If xnn does not yet support the translation of a particular upstream model, you
+can extend the translation table with a new entry. 
 
 .. code-block:: python
 
@@ -48,5 +46,5 @@ Add a table
 
    register_key_translation("mymodel", {"r_cut": "cutoff", "n_bessel": "n_rbf"})
 
-The table applies to every config with ``model.name == "mymodel"``, whatever
-the frontend.
+Once registered, the translation table applies to every config with ``model.name
+== "mymodel"``, whatever the frontend.

@@ -4,18 +4,23 @@
 Export to LAMMPS and TorchScript
 **********************************
 
-SchNet, DimeNet, GemNet, NequIP, MACE and Allegro export to a self-contained TorchScript
-file that needs nothing but ``libtorch`` or ``torch.jit.load``: no xnn, no
-Python model code, no config. The scripted models match the eager ones to
-about 1e-15.
+SchNet, DimeNet, GemNet, NequIP, MACE and Allegro export to a self-contained
+TorchScript file that needs nothing but ``libtorch`` or ``torch.jit.load``: no
+xnn, no Python model code, no config. The scripted models match their eager
+variants to about 1e-15.
 
 Export
 ======
 
+You can export a model checkpoint to its TorchScript format using the command
+line interface:
+
 .. code-block:: bash
 
    xnn export --ckpt runs/exp/best.pt --out deployed.pt
-   xnn export --ckpt mace-off23-small --out mace_off.pt        # any hub name works
+   xnn export --ckpt mace-off23-small --out mace_off.pt     # Any valid model hub name works
+
+or using the Python API:
 
 .. code-block:: python
 
@@ -29,30 +34,25 @@ the charge state of the deployed system, and ``--no-dispersion`` leaves out
 a dispersion term the checkpoint records as subtracted from its labels
 (:ref:`deployment`).
 
-Use it
-======
-The file has two entry points. ``forward`` takes the whole system and builds
-its own neighbor list:
+Using the exported model
+========================
+The export framework offers two entry points for inference. The ``forward``
+function, which takes the whole system and builds its own neighbor list from it:
 
 .. code-block:: python
 
    import torch
 
    model = torch.jit.load("deployed.pt")
-   out = model(pos, atomic_numbers, cell, pbc)      # cell / pbc optional for molecules
+
+   # cell / pbc optional for molecules
+   out = model(pos, atomic_numbers, cell, pbc)
+
    energy, forces, stress = out["energy"], out["forces"], out["stress"]
 
-``forward_lammps(pos, edge_index, cell_shifts, atomic_numbers, cell)`` is
-the pair-style interface of the ``pair_nequip`` / ``pair_allegro`` /
-``pair_mace`` pattern: the MD engine supplies the neighbor list. One
-structure per call, no batch dimension; ``torch.no_grad()`` is fine,
-``torch.inference_mode()`` is not (forces need autograd).
-
-Which models export
-===================
-SchNet, DimeNet, GemNet (not the direct-force variants), NequIP, MACE, Allegro and AIMNet2, with or without a D3 / D4 term.
-CACE, PhysNet, BAMBOO and the classical force fields deploy through ASE or
-the MDI engine instead. A long-range LES model exports, but its Ewald sum is
-global, so drive it with the whole system on one rank (``forward``, ``fix
-external`` or the :ref:`MDI engine <deployment>`), never through a
-domain-decomposed pair style.
+The ``forward_lammps(pos, edge_index, cell_shifts, atomic_numbers, cell)``
+function, which implements the pair-style interface of the ``pair_nequip`` /
+``pair_allegro`` / ``pair_mace`` pattern where the MD engine supplies the
+neighbor list. One structure is processed per call with no batch dimension.
+Using ``torch.no_grad()`` is fine but using ``torch.inference_mode()`` is not
+(because forces are computed with autograd).
