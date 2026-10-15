@@ -704,6 +704,21 @@ def test_dielectric_is_learnable_and_validated():
     assert float(built.dielectric) == pytest.approx(78.4)
 
 
+@pytest.mark.parametrize("learn", [False, True])
+def test_checkpoint_without_dielectric_loads_strictly(learn):
+    """A state dict from before the dielectric existed loads with the built value."""
+    model = _schnet_les(constrain_charge=True, dielectric=78.4, learn_dielectric=learn)
+    state = {k: v for k, v in model.state_dict().items() if k != "log_dielectric"}
+    fresh = _schnet_les(seed=5, constrain_charge=True, dielectric=78.4, learn_dielectric=learn)
+    fresh.load_state_dict(state, strict=True)
+    assert float(fresh.dielectric) == pytest.approx(78.4)
+    g = _charged(1, 7, -1.0)
+    assert torch.allclose(fresh(g)["energy"], model(g)["energy"], atol=1e-12)
+    wrapped = ForceStressOutput(_schnet_les(seed=5, constrain_charge=True))
+    wrapped.load_state_dict({"model." + k: v for k, v in state.items()}, strict=True)
+    assert float(wrapped.model.dielectric) == pytest.approx(1.0)
+
+
 def test_ase_calculator_reports_les_charges_and_dipole():
     pytest.importorskip("ase")
     from ase import Atoms

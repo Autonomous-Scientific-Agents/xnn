@@ -38,6 +38,7 @@ The wrapped energy cost is roughly twice the short-range cost.
 """
 from __future__ import annotations
 
+import logging
 import math
 from typing import List, Optional, Tuple
 
@@ -807,6 +808,17 @@ class LatentEwald(InteratomicPotential):
         else:
             self.register_buffer("log_dielectric", log_eps)
         self.use_fast = "auto"
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        # checkpoints written before the dielectric existed carry no
+        # ``log_dielectric``; they were trained unscreened, so a missing key
+        # loads as the value the module was built with instead of failing
+        key = prefix + "log_dielectric"
+        if key not in state_dict:
+            state_dict[key] = self.log_dielectric.detach().clone()
+            logging.getLogger(__name__).info(
+                "checkpoint has no %s: keeping dielectric=%g", key, float(self.dielectric))
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     @property
     def dielectric(self) -> Tensor:
