@@ -1,15 +1,15 @@
 .. _howto-forcefield-files:
 
-*******************************************
-Use and write ``.frc`` force-field files
-*******************************************
+******************************
+Working with Force-field Files
+******************************
 
-The classical force fields (ReaxFF, OPLS, DREIDING) read their parameters
-from one format: the MolSSI/SEAMM ``.frc`` file (:mod:`xnn.ffnn.common.frc`),
-the format of the `SEAMM force-field distribution
+The classical force-fields such as ReaxFF, OPLS, DREIDING read their parameters
+from the MolSSI/SEAMM ``.frc`` file format (see :mod:`xnn.ffnn.common.frc`),
+developed by MolSSI and used in `SEAMM force-field distribution
 <https://github.com/molssi-seamm/forcefield_step/tree/main/forcefield_step/data>`_.
-A ``.frc`` file also carries SMARTS templates that assign its atom types to
-any molecule, so a fixed-topology field applies without knowing its type
+A ``.frc`` file also carries SMARTS templates that assign its atom types to the
+molecules. Thus, any fixed-topology field can be adopted without knowing its type
 names.
 
 What ships with xnn
