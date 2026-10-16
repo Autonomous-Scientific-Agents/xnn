@@ -26,14 +26,14 @@ xnn offers several benefits out-of-the-box:
   (:ref:`fidelity`).
 - **One pipeline.** Shared data object, config schema, trainer and
   deployment to ASE, LAMMPS and the MolSSI Driver Interface.
-- **Pre-trained and benchmark data in one line.** ``from_pretrained()`` loads
+- **Access pre-trained models and benchmark data in one line.** ``from_pretrained()`` loads
   the MACE and AIMNet2 foundation models and your own checkpoints;
   ``load_dataset()`` downloads and converts standard datasets into ML-ready
   formats.
 - **Fine-tuning, benchmarking and multi-GPU training** from a config file
   and the ``xnn`` command.
-- **Physics add-ons for any model.** Latent Ewald long-range electrostatics
-  and DFT-D3 / DFT-D4 dispersion wrap every potential.
+- **Physics add-ons for any model.** Latent Ewald long-range electrostatics and
+  DFT-D3 / DFT-D4 dispersion can be added to any short-range model.
 - **Fast paths.** Fused GPU kernels for the expensive blocks, switched on
   per run without changing the model.
 

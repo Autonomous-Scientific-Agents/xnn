@@ -4,8 +4,9 @@
 User Guide
 **********
 
-Reference information: the data pipeline, the featurizers, the models and
-their options, configuration, training, deployment and the command line.
+User Guides offer reference information on data pipelines, featurizers, the
+models and their options, configurations, as well as the training, deployment
+and the command line interfaces.
 
 .. toctree::
    :maxdepth: 2
