@@ -5,32 +5,35 @@ Models
 ******
 
 Every model takes an :class:`~xnn.common.data.atomic_data.AtomicGraph` and
-returns ``node_energy`` and ``energy``;
-:class:`~xnn.common.models.outputs.ForceStressOutput` adds forces and stress
-by autograd. Models are built by name from a config, or constructed
-directly with the same keys:
+returns predicted properties such as ``node_energy`` and ``energy``. The
+:class:`~xnn.common.models.outputs.ForceStressOutput` class enables the models
+to compute atomic forces and stress using autograd. Models are built by name
+from a config, or constructed directly with the same keys:
 
 .. code-block:: python
 
    from xnn.common.models import available_models, build_model, ForceStressOutput
 
-   available_models()          # ['aimnet2', 'allegro', 'ani', 'bamboo', 'cace', 'cnn3d', 'dimenet', 'dimenet++', 'hdnnp', 'mace', 'nequip', 'nnp1g', 'painn', 'physnet', 'reaxff', 'schnet', 'se3cnn', 'spookynet', ...]
-   model = build_model(cfg.model)   # dispatches to <Model>.from_config(cfg.model)
+   available_models()               # ['aimnet2', 'allegro', 'ani', ...]
+   model = build_model(cfg.model)   # Dispatches to <Model>.from_config(cfg.model)
 
+   # Wrap the model to compute forces and stress
    model = ForceStressOutput(build_model(cfg.model), compute_stress=True)
-   out = model(graph)      # energy, node_energy, forces, stress
+   out = model(graph)               # energy, node_energy, forces, stress
 
-Pre-trained models load with ``from_pretrained()``
-(:ref:`howto-pretrained-models`). NequIP, MACE, Allegro and the SE(3)
-steerable CNN need the ``gnn`` extra (e3nn); every other model is plain
-PyTorch. The snippets below show
-the options most runs set; each class documents the full list.
+Pre-trained models can be fetched with ``from_pretrained()`` from the model hub
+(see :ref:`howto-pretrained-models` for more details). NequIP, MACE, Allegro and
+the SE(3) steerable CNN require the ``gnn`` extra dependencies installed
+(alongside e3nn).
+
 
 MACE
 ====
-:class:`~xnn.gnn.models.mace.MACE`: higher-order equivariant message passing
-(Batatia *et al.*), matching `ACEsuit/mace <https://github.com/ACEsuit/mace>`_.
-Every published MACE-MP / MACE-OFF checkpoint loads through the hub.
+The :class:`~xnn.gnn.models.mace.MACE` model (`ACEsuit/mace
+<https://github.com/ACEsuit/mace>`_) offers higher-order equivariant message
+passing framework of `Batatia et al. <https://doi.org/10.52202/068431-0830>`_
+Every published MACE-MP, MACE-OFF, etc. checkpoint can be fetched through the
+xnn's model hub.
 
 .. code-block:: yaml
 
@@ -39,22 +42,23 @@ Every published MACE-MP / MACE-OFF checkpoint loads through the hub.
      cutoff: 5.0
      species: [1, 6, 8]
      num_channels: 64
-     num_interactions: 2         # any depth from 0
+     num_interactions: 2         # Any depth from 0
      max_ell: 3
      correlation: 3
      avg_num_neighbors: 20.0
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
-     # foundation: mace-off23-small   # start from a pretrained checkpoint instead
+     # foundation: mace-off23-small   # Uncomment to start from a pretrained checkpoint instead
 
-Also ``max_L``, ``hidden_irreps``, ``MLP_irreps``, ``radial_type``,
-``distance_transform`` (Agnesi / Soft), ``pair_repulsion`` (ZBL),
-``scale`` / ``shift``.
+Other options such as ``max_L``, ``hidden_irreps``, ``MLP_irreps``,
+``radial_type``, ``distance_transform`` (Agnesi / Soft), ``pair_repulsion``
+(ZBL), and ``scale`` / ``shift`` can also be set.
 
 NequIP
 ======
-:class:`~xnn.gnn.models.nequip.NequIP`: E(3)-equivariant message passing
-with gated nonlinearities (Batzner *et al.*), matching `mir-group/nequip
-<https://github.com/mir-group/nequip>`_; state dicts transplant directly.
+:class:`~xnn.gnn.models.nequip.NequIP` (`mir-group/nequip
+<https://github.com/mir-group/nequip>`_) is an E(3)-equivariant message passing
+model with gated nonlinearities (`Batzner et al.
+<https://doi.org/10.1038/s41467-022-29939-5>`_).
 
 .. code-block:: yaml
 
@@ -69,14 +73,16 @@ with gated nonlinearities (Batzner *et al.*), matching `mir-group/nequip
      avg_num_neighbors: 20.0
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``invariant_layers`` / ``invariant_neurons``, ``resnet``, ``use_sc``,
-``trainable_rbf``, ``atomic_scales``.
+Other options, including ``invariant_layers`` / ``invariant_neurons``,
+``resnet``, ``use_sc``, ``trainable_rbf``, and ``atomic_scales`` are also
+available.
 
 Allegro
 =======
-:class:`~xnn.gnn.models.allegro.Allegro`: strictly local equivariant
-many-body potential without message passing (Musaelian *et al.*), matching
-`mir-group/allegro <https://github.com/mir-group/allegro>`_ v0.3.0.
+:class:`~xnn.gnn.models.allegro.Allegro` (`mir-group/allegro
+<https://github.com/mir-group/allegro>`_ v0.3.0) is a strictly local equivariant
+many-body potential without message passing (`Musaelian et al.
+<https://doi.org/10.1038/s41467-023-36329-y>`_).
 
 .. code-block:: yaml
 
@@ -92,15 +98,16 @@ many-body potential without message passing (Musaelian *et al.*), matching
      avg_num_neighbors: 20.0
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``parity``, ``env_embed``, ``edge_eng``, ``latent_resnet``,
-``atomic_scales``.
+Other options, including ``parity``, ``env_embed``, ``edge_eng``,
+``latent_resnet``, and ``atomic_scales`` can also be used.
 
 CACE
 ====
-:class:`~xnn.gnn.models.cace.CACE`: the Cartesian atomic cluster expansion
-(Cheng 2024), body-ordered invariants from Cartesian monomials with optional
-message passing; no e3nn. Matches `BingqingCheng/cace
-<https://github.com/BingqingCheng/cace>`_.
+:class:`~xnn.gnn.models.cace.CACE` (`BingqingCheng/cace
+<https://github.com/BingqingCheng/cace>`_) is the Cartesian atomic cluster
+expansion of `Cheng <https://doi.org/10.1038/s41524-024-01332-4>`_. It builds
+body-ordered invariants from Cartesian monomials, with optional message passing
+(it does not required e3nn).
 
 .. code-block:: yaml
 
@@ -111,66 +118,69 @@ message passing; no e3nn. Matches `BingqingCheng/cace
      n_atom_basis: 3
      max_l: 3
      max_nu: 3
-     num_message_passing: 1      # 0 = plain Cartesian ACE
+     num_message_passing: 1      # 0 gives plain Cartesian ACE
      avg_num_neighbors: 10.0
 
-Also ``message_types`` (M / Ar / Bchi), ``n_rbf``, ``readout_hidden``,
-``atomic_energies``.
+Other options, including ``message_types`` (M / Ar / Bchi), ``n_rbf``,
+``readout_hidden`` and ``atomic_energies``, are also available.
 
 AIMNet2
 =======
-:class:`~xnn.gnn.models.aimnet2.AIMNet2`: the atoms-in-molecules network
-(Anstine, Zubatyuk and Isayev 2025) for neutral, charged and open-shell
-molecules; predicts partial charges exact in the net charge and adds their
-Coulomb energy. Matches `isayevlab/aimnetcentral
-<https://github.com/isayevlab/aimnetcentral>`_; the six published families
-load through the hub. Returns ``charges`` and ``dipole`` as well.
+:class:`~xnn.gnn.models.aimnet2.AIMNet2` (`isayevlab/aimnetcentral
+<https://github.com/isayevlab/aimnetcentral>`_) is the atoms-in-molecules
+network of `Anstine et al. <https://doi.org/10.1039/D4SC08572H>`_ for neutral,
+charged and open-shell molecules. It predicts partial charges that sum exactly
+to the net charge and adds their Coulomb energy. The six published families can
+be fetched through the model hub.
 
 .. code-block:: python
 
    from xnn.common.models import from_pretrained
 
-   model = from_pretrained("aimnet2")                                   # wb97m-d3, with its D3 term
-   model = from_pretrained("aimnet2", model_options={"coulomb": "pme"})  # periodic cells: dsf / ewald / pme
+   model = from_pretrained("aimnet2")                                    # wB97M-D3, with its D3 term
+   model = from_pretrained("aimnet2", model_options={"coulomb": "pme"})  # Periodic cells: dsf / ewald / pme
 
-The net charge and spin multiplicity come from the structure
-(``total_charge``, ``spin_multiplicity``). Training from scratch uses
-``n_features``, ``n_rbf``, ``n_interactions``, ``hidden``, ``aim_size``,
-``charge_channels`` (2 for open shells), ``coulomb``, ``lr_cutoff``.
+The net charge and spin multiplicity come from the structure. To train from
+scratch, set ``n_features``, ``n_rbf``, ``n_interactions``, ``hidden``,
+``aim_size``, ``charge_channels`` (2 for open shells), ``coulomb`` and
+``lr_cutoff``. The outputs also include ``charges`` and ``dipole``.
 
 SchNet
 ======
-:class:`~xnn.gnn.models.schnet.SchNet`: continuous-filter convolutions
-(Schütt *et al.* 2017), a clean-room build of the paper with the paper's
-architecture as defaults.
+:class:`~xnn.gnn.models.schnet.SchNet` is the continuous-filter convolutional
+network of `Schütt et al.
+<https://proceedings.neurips.cc/paper/2017/hash/303ed4c69846ab36c2904d3ba8573050-Abstract.html>`_,
+built from the paper with its architecture as the defaults.
 
 .. code-block:: yaml
 
    model:
      name: schnet
      cutoff: 5.0
-     cutoff_fn: cosine           # smooth finite cutoff; the paper trains cutoff-free
+     cutoff_fn: cosine           # Smooth finite cutoff; the paper trains cutoff-free
      n_features: 64
      n_interactions: 3
      n_rbf: 50
      species: [1, 6, 8]
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``gamma``, ``energy_shift`` / ``energy_scale``.
+Other options such as ``gamma`` and ``energy_shift`` / ``energy_scale`` can also
+be set.
 
 DimeNet and DimeNet++
 =====================
 :class:`~xnn.gnn.models.dimenet.DimeNet` and
-:class:`~xnn.gnn.models.dimenet.DimeNetPP`: directional message passing
-(Gasteiger *et al.* 2020). Messages live on directed edges and are updated
-from the distances and angles of neighboring edges through Bessel bases;
-DimeNet++ swaps the bilinear interaction for a cheaper Hadamard form.
-No e3nn. Matches `gasteigerjo/dimenet <https://github.com/gasteigerjo/dimenet>`_.
+:class:`~xnn.gnn.models.dimenet.DimeNetPP` (`gasteigerjo/dimenet
+<https://github.com/gasteigerjo/dimenet>`_) are the directional message passing
+networks of Gasteiger et al. (`DimeNet <https://arxiv.org/abs/2003.03123>`_, and
+`DimeNet++ <https://arxiv.org/abs/2011.14115>`_). Messages live on directed
+edges and are updated from the distances and angles of neighboring edges.
+DimeNet++ replaces the bilinear interaction with a cheaper one.
 
 .. code-block:: yaml
 
    model:
-     name: dimenet++             # or dimenet
+     name: dimenet++             # Or dimenet
      cutoff: 5.0
      n_features: 128
      n_interactions: 4           # 6 for dimenet
@@ -179,52 +189,47 @@ No e3nn. Matches `gasteigerjo/dimenet <https://github.com/gasteigerjo/dimenet>`_
      species: [1, 6, 8]
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``n_bilinear`` (dimenet), ``n_triplet_features`` /
-``n_basis_features`` / ``n_output_features`` (dimenet++), ``p``,
-``trainable_rbf``. The reference code's key spellings are translated.
+Other options, including ``n_bilinear`` (DimeNet), ``n_triplet_features`` /
+``n_basis_features`` / ``n_output_features`` (DimeNet++), ``p`` and
+``trainable_rbf``, are also available.
 
 GemNet
 ======
-:class:`~xnn.gnn.models.gemnet.GemNet`: geometric message passing
-(Gasteiger *et al.* 2021). Directed edge embeddings are updated from
-neighboring edges into the same atom (distance and angle) and, with
-``quadruplets``, from edges two hops away across an interaction edge
-(adding the dihedral angle). Scaling factors replace normalization layers;
-the trainer fits them on training structures before the first epoch. No
-e3nn. Matches `TUM-DAML/gemnet_pytorch
-<https://github.com/TUM-DAML/gemnet_pytorch>`_.
+:class:`~xnn.gnn.models.gemnet.GemNet` (`TUM-DAML/gemnet_pytorch
+<https://github.com/TUM-DAML/gemnet_pytorch>`_) is the geometric message
+passing network of `Gasteiger et al. <https://arxiv.org/abs/2106.08903>`_ Edge
+embeddings are updated from neighboring edges (distances and angles) and, with
+``quadruplets``, from edges two hops away (adding dihedral angles). The trainer
+fits its scaling factors on the training structures before the first epoch.
 
 .. code-block:: yaml
 
    model:
      name: gemnet
-     cutoff: 5.0                 # embedding cutoff
+     cutoff: 5.0                 # Embedding cutoff
      n_features: 128
      n_interactions: 4
      n_rbf: 6
-     int_cutoff: 10.0            # graphs are built to this radius
+     int_cutoff: 10.0            # Graphs are built to this radius
      n_spherical: 7
-     quadruplets: true           # false: GemNet-T
-     direct_forces: false        # true: GemNet-dQ / -dT
+     quadruplets: true           # false gives GemNet-T
+     direct_forces: false        # true gives GemNet-dQ / -dT
      species: [1, 6, 8]
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``n_edge_features``, ``n_triplet_features`` / ``n_quadruplet_features``,
-``n_rbf_features`` / ``n_cbf_features`` / ``n_sbf_features``,
-``n_bilinear_triplet`` / ``n_bilinear_quadruplet``, ``p``,
-``forces_coupled``, ``scaling_factors`` (a dict or the reference code's JSON
-file) and ``fit_scaling: false``. Direct forces are not conservative and
+Other options, including the feature sizes ``n_edge_features``,
+``n_triplet_features`` and ``n_quadruplet_features``, ``scaling_factors`` and
+``fit_scaling``, can also be set. Direct forces are not conservative, so they
 cannot be combined with LES or dispersion terms or exported to TorchScript.
-The reference code's key spellings are translated.
 
 PaiNN
 =====
-:class:`~xnn.gnn.models.painn.PaiNN`: equivariant message passing with
-scalar and vector features (Schütt *et al.* 2021). Optional heads predict
-dipole moments from latent charges and atomic dipoles and polarizability
-tensors from a rank-1 decomposition; train them with ``dipole_weight`` /
-``polarizability_weight`` on data with ``dipole`` / ``polarizability``
-labels. No e3nn. Matches the reference implementation (``schnetpack``).
+:class:`~xnn.gnn.models.painn.PaiNN` is the equivariant message passing network
+of `Schütt et al. <https://arxiv.org/abs/2102.03150>`_ with scalar and vector
+features, matching ``schnetpack``. Optional heads predict dipole moments and
+polarizability tensors, trained with ``dipole_weight`` /
+``polarizability_weight`` on data that has ``dipole`` / ``polarizability``
+labels.
 
 .. code-block:: yaml
 
@@ -233,87 +238,73 @@ labels. No e3nn. Matches the reference implementation (``schnetpack``).
      cutoff: 5.0
      n_features: 128
      n_interactions: 3
-     n_rbf: 20                   # sin(n pi r / r_cut) / r with a cosine cutoff
-     dipole: true                # outputs dipole and latent charges
+     n_rbf: 20
+     dipole: true                # Outputs the dipole and latent charges
      polarizability: true
      species: [1, 6, 8]
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``radial_basis`` (``bessel`` / ``gaussian``), ``shared_filters``,
-``atomic_dipoles``, ``correct_charges``, ``n_output_blocks``, the ablations
-``scalar_product`` / ``vector_propagation`` / ``vector_features``, and
-``energy_shift`` / ``energy_scale``.
+Other options, including ``radial_basis`` (bessel / gaussian),
+``shared_filters``, ``atomic_dipoles`` and ``energy_shift`` /
+``energy_scale``, are also available.
 
 SE(3) steerable CNN and 3D CNN
 ==============================
-:class:`~xnn.cnn.models.steerable.SteerableCNN`: the SE(3)-equivariant
-convolutional network of Weiler *et al.* (NeurIPS 2018) on voxel grids of
-each atom's environment, a clean-room build of the paper. Fields of order
-0, 1 and 2 pass through gated steerable convolutions; the pooled scalar
-fields are read out to per-atom energies. :class:`~xnn.cnn.models.cnn3d.CNN3D`
-is the conventional 3D CNN baseline with the same grids, readout and block
-layout. Both use :class:`~xnn.cnn.featurizers.voxel.VoxelGrid`, one density
-channel per species.
+:class:`~xnn.cnn.models.steerable.SteerableCNN` is the rotation-equivariant
+convolutional network of `Weiler et al. <https://arxiv.org/abs/1807.02547>`_,
+applied to a voxel grid around each atom (one density channel per species).
+:class:`~xnn.cnn.models.cnn3d.CNN3D` is the conventional 3D CNN baseline with the
+same grids and readout.
 
 .. code-block:: yaml
 
    model:
-     name: se3cnn                # or cnn3d
-     cutoff: 4.0                 # half the side of the voxel cube
+     name: se3cnn                # Or cnn3d
+     cutoff: 4.0                 # Half the side of the voxel cube
      species: [1, 6, 8]
-     grid_size: 17               # voxels per axis
-     n_features: 32              # scalar fields (channels) of the last block
-     n_interactions: 3           # blocks
-     l_max: 2                    # highest field order (se3cnn only)
+     grid_size: 17               # Voxels per axis
+     n_features: 32              # Channels of the last block
+     n_interactions: 3           # Number of blocks
+     l_max: 2                    # Highest field order (se3cnn only)
      kernel_size: 5
      atomic_energies: {1: -13.6, 6: -1029.9, 8: -2042.8}
 
-Also ``fields`` / ``channels`` (explicit block widths), ``strides``,
-``activation`` ("ssp"), ``normalization`` ("batch"), ``bandlimit``,
-``shell_width``, ``sigma``, ``cutoff_fn``, ``energy_shift`` /
-``energy_scale``. The steerable model is exactly invariant under the
-rotations of the grid onto itself and invariant to the bandlimit under all
-others; mirror images are not constrained.
+Other options, including ``strides``, ``activation``, ``normalization``,
+``bandlimit`` and ``sigma``, can also be set. Because the grid is discrete, the
+steerable model is exactly invariant only under rotations that map the grid
+onto itself, and approximately invariant under all others.
 
 Spherical CNN
 =============
-:class:`~xnn.cnn.models.spherical.SphericalCNN` (``s2cnn``): the
-rotation-equivariant network of Cohen *et al.* (ICLR 2018) over spherical
-signals, a clean-room build of the paper. Each atom carries one potential
-channel per species sampled on a sphere around it
-(:class:`~xnn.cnn.featurizers.spherical.SphericalGrid`); ResNet blocks of
-:math:`S^2` and :math:`SO(3)` correlations, computed by generalized FFTs,
-map it to :math:`SO(3)` feature maps whose invariant integral is read out
-to per-atom energies. No e3nn. Matches `jonas-koehler/s2cnn
-<https://github.com/jonas-koehler/s2cnn>`_.
+:class:`~xnn.cnn.models.spherical.SphericalCNN` (`jonas-koehler/s2cnn
+<https://github.com/jonas-koehler/s2cnn>`_) is the rotation-equivariant network
+of `Cohen et al. <https://arxiv.org/abs/1801.10130>`_. Each atom sees its
+neighbors as signals on a sphere around it, one channel per species, which
+spherical convolutions map to rotation-invariant per-atom energies.
 
 .. code-block:: yaml
 
    model:
      name: s2cnn
-     cutoff: 10.0                # neighbor radius of the potential sums
+     cutoff: 10.0                # Neighbor radius of the potential sums
      species: [1, 6, 7, 8, 16]
-     radius: 0.48                # sphere radius (A)
+     radius: 0.48                # Sphere radius in Angstrom
      bandwidth: 10               # 2b x 2b samples per sphere
-     n_features: 160             # channels of the last block
-     n_interactions: 5           # ResNet blocks (Table 3 of the paper)
+     n_features: 160             # Channels of the last block
+     n_interactions: 5           # ResNet blocks, as in the paper
      atomic_energies: {1: -13.6, 6: -1029.9, 7: -1485.3, 8: -2042.8, 16: -10831.3}
 
-Also ``features`` / ``bandwidths`` (explicit per block), ``exponent`` (1,
-the paper's potential; 2 in the reference data script), ``set_readout``
-(the paper's DeepSet readout, e.g. ``[150, 100, 50]``), ``normalization``
-("batch"), ``activation`` ("relu"), ``n_alpha`` / ``n_beta`` / ``n_gamma``
-/ ``max_beta`` (filter support), ``cutoff_fn``, ``energy_shift`` /
-``energy_scale``. The energy is exactly invariant under rotations about the
-polar axis that map the coarsest grid onto itself and invariant to the
-discretization error under all others.
+Other options, including ``features`` / ``bandwidths`` per block,
+``set_readout`` (the paper's DeepSet readout), ``normalization`` and
+``activation``, are also available.
 
 ANI
 ===
-:class:`~xnn.dnn.models.ani.ANI`: per-element networks over the atomic
-environment vector (Smith *et al.* 2017), matching `aiqm/torchani
-<https://github.com/aiqm/torchani>`_. The published parameterisations are
-presets, each with its training set in the data hub:
+:class:`~xnn.dnn.models.ani.ANI` (`aiqm/torchani
+<https://github.com/aiqm/torchani>`_) is the per-element network over atomic
+environment vectors of `Smith et al. <https://doi.org/10.1039/C6SC05720A>`_.
+The published parameterizations are presets, and each has its training set in
+the data hub:
 
 .. code-block:: python
 
@@ -324,22 +315,18 @@ presets, each with its training set in the data hub:
    ANI.ani1ccx(species=[1, 6, 7, 8])   # ANI-1ccx, coupled-cluster self energies
    ANI.ani2x()                         # ANI-2x, seven elements (H, C, N, O, S, F, Cl)
 
-.. code-block:: yaml
-
-   model:
-     name: ani
-     preset: ani-2x              # ani-1 / ani-1x / ani-1ccx / ani-2x
-
-Without a preset: ``species``, ``radial_cutoff``, ``angular_cutoff``,
-``hidden``, ``activation``, ``atomic_energies``.
+In a config, set ``preset: ani-2x`` (or ``ani-1``, ``ani-1x``, ``ani-1ccx``).
+Without a preset, ``species``, ``radial_cutoff``, ``angular_cutoff``,
+``hidden``, ``activation`` and ``atomic_energies`` define the model.
 
 PhysNet
 =======
-:class:`~xnn.dnn.models.physnet.PhysNet`: message passing with explicit
-electrostatics and D3 dispersion (Unke and Meuwly 2019), a pure-PyTorch
-translation of `MMunibas/PhysNet <https://github.com/MMunibas/PhysNet>`_.
-Embeds elements directly (no species list); returns ``charges`` and
-``dipole``.
+:class:`~xnn.dnn.models.physnet.PhysNet` (`MMunibas/PhysNet
+<https://github.com/MMunibas/PhysNet>`_) is the message passing network of
+`Unke and Meuwly <https://doi.org/10.1021/acs.jctc.9b00181>`_ with explicit
+electrostatics and D3 dispersion, translated from TensorFlow to PyTorch. It
+embeds elements directly, so it needs no species list, and also returns
+``charges`` and ``dipole``.
 
 .. code-block:: yaml
 
@@ -354,47 +341,37 @@ Embeds elements directly (no species list); returns ``charges`` and
 
 HDNNP
 =====
-High-dimensional neural network potentials in the four generations of
-Behler's classification (*Chem. Rev.* 121, 10037, 2021), matching the RuNNer
-code:
+High-dimensional neural network potentials cover the four generations of
+`Behler's classification <https://doi.org/10.1021/acs.chemrev.0c00868>`_ and
+match the RuNNer code:
 
-- **1G** :class:`~xnn.dnn.models.hdnnp.NNP1G` (``nnp1g``): one network maps
-  the interatomic distances of a fixed system to its energy; optionally
-  symmetrized over permutations of like atoms.
-- **2G** :class:`~xnn.dnn.models.hdnnp.HDNNP` (``hdnnp``): a sum of atomic
-  energies from one network per element on atom-centered symmetry functions
-  (Behler and Parrinello 2007).
-- **3G** (``generation: 3``): a second set of element networks predicts
-  charges, shifted to the total charge, whose (Gaussian or point-charge)
-  electrostatic energy is added (Artrith *et al.* 2011, Morawietz *et al.*
-  2012), optionally screened inside a cutoff.
-- **4G** (``generation: 4``): the networks predict electronegativities, a
-  charge equilibration over the whole structure gives the charges (non-local
-  charge transfer, total charge), and each charge is an extra input of the
-  short-range networks (Ko *et al.* 2021).
-
-Returns ``energy_short`` and, for 3G and 4G, ``charges``, ``energy_elec``
-and ``dipole`` (molecules); train the charges with ``charge_weight`` on
-``charges`` labels. Options: ``generation``, ``species``, ``cutoffs``,
-``symmetry_functions``, ``scaling``, ``hidden``, ``activation``,
-``atomic_energies``, ``gaussian_widths``, ``screening``, ``hardness``
-(``element`` or ``network``), ``charge_neuron``, ``runner``; see
-``configs/model/hdnnp.yaml``.
+- **1G** (``nnp1g``): one network maps the interatomic distances of a fixed
+  system to its energy.
+- **2G** (``hdnnp``): a sum of atomic energies from one network per element on
+  atom-centered symmetry functions.
+- **3G** (``generation: 3``): a second set of networks predicts charges, whose
+  electrostatic energy is added.
+- **4G** (``generation: 4``): a charge equilibration over the whole structure
+  gives the charges, which allows non-local charge transfer.
 
 .. code-block:: python
 
    from xnn.dnn.common.runner import load_runner_model
 
-   model = load_runner_model("runner_model/")   # input.nn, weights, scaling files
-   model.fit_scaling(train_graphs)              # or fit the symmetry-function scaling
+   model = load_runner_model("runner_model/")   # input.nn, weights and scaling files
+   model.fit_scaling(train_graphs)              # Fit the symmetry-function scaling
+
+The 3G and 4G models also return ``charges``, ``energy_elec`` and ``dipole``.
+You can also train the charges with ``charge_weight`` on ``charges`` labels. The
+``configs/model/hdnnp.yaml`` config file lists every available option.
 
 BAMBOO
 ======
-:class:`~xnn.hybrid.models.bamboo.BAMBOO`: a graph equivariant transformer
-with a charge-equilibrium electrostatic term (Gong *et al.* 2024), matching
-`bytedance/bamboo <https://github.com/bytedance/bamboo>`_. Works in
-kcal/mol and Å; returns ``charges``, ``dipole``, ``energy_nn`` and
-``energy_elec``.
+:class:`~xnn.hybrid.models.bamboo.BAMBOO` (`bytedance/bamboo
+<https://github.com/bytedance/bamboo>`_) is the graph equivariant transformer
+of `Gong et al. <https://arxiv.org/abs/2404.07181>`_ with a charge-equilibrium
+electrostatic term. It works in kcal/mol and Angstrom and also returns
+``charges``, ``dipole``, ``energy_nn`` and ``energy_elec``.
 
 .. code-block:: yaml
 
@@ -405,19 +382,16 @@ kcal/mol and Å; returns ``charges``, ``dipole``, ``energy_nn`` and
      n_interactions: 3
      num_heads: 16
      use_electrostatics: true
-     use_dispersion: false       # optional D3(CSO)
+     use_dispersion: false       # Optional D3(CSO) term
 
 SpookyNet
 =========
-:class:`~xnn.hybrid.models.spookynet.SpookyNet`: message passing with
-electronic degrees of freedom and nonlocal effects (Unke *et al.* 2021).
-The total charge and the spin enter as embeddings, local interactions use
-s-, p- and d-orbital-like basis functions, and self-attention over all atoms
-of a structure carries nonlocal effects. A ZBL-like repulsion, damped
-electrostatics of the predicted charges and D4 dispersion are added to the
-energy. Returns ``charges`` and ``dipole`` as well. No e3nn. Matches the
-reference implementation (`OUnke/SpookyNet <https://github.com/OUnke/SpookyNet>`_),
-whose saved models load with ``SpookyNet.from_reference_checkpoint(path)``.
+:class:`~xnn.hybrid.models.spookynet.SpookyNet` (`OUnke/SpookyNet
+<https://github.com/OUnke/SpookyNet>`_) is the message passing network of `Unke
+et al. <https://doi.org/10.1038/s41467-021-27504-0>`_ with electronic degrees of
+freedom and nonlocal effects. The total charge and spin enter as embeddings, and
+self-attention over all atoms carries nonlocal effects. The saved reference
+models can be loaded with ``SpookyNet.from_reference_checkpoint(path)``.
 
 .. code-block:: yaml
 
@@ -426,24 +400,21 @@ whose saved models load with ``SpookyNet.from_reference_checkpoint(path)``.
      cutoff: 5.29                # 10 bohr
      n_features: 128
      n_interactions: 6
-     n_rbf: 16                   # exponential Bernstein polynomials
-     extra:
-       lr_cutoff: 10.0           # long-range cutoff; needed for periodic cells
-       electrostatics: false     # without dipole or charge labels
-       d4_dispersion: false
+     n_rbf: 16
+     lr_cutoff: 10.0             # Long-range cutoff, needed for periodic cells
+     electrostatics: false       # Enable when you have dipole or charge labels
+     d4_dispersion: false
 
-The net charge and spin multiplicity come from the structure
-(``total_charge``, ``spin_multiplicity``). Also ``charge_embedding`` /
-``spin_embedding``, ``nonlocal_interactions``, ``attention`` (``favor`` /
-``exact``), ``zbl_repulsion``, ``ewald``, ``exp_weighting``, ``n_residual``.
+Other options, including ``nonlocal_interactions``, ``attention`` (favor /
+exact), ``zbl_repulsion`` and ``ewald``, are also available. The outputs also
+include ``charges`` and ``dipole``.
 
 ReaxFF / ReaxFF-nn
 ==================
-:class:`~xnn.ffnn.models.reaxff.ReaxFF`: the bond-order reactive force
-field (van Duin *et al.* 2001) and its neural variant. Bond orders come from
-distances, so bonds break and form smoothly, and charges are equilibrated
-at every geometry. Any parameter group can be refit by gradient descent.
-Returns ``charges`` and the per-term energies.
+:class:`~xnn.ffnn.models.reaxff.ReaxFF` is the bond-order reactive force field
+of `van Duin et al. <https://doi.org/10.1021/jp004368u>`_ and its neural
+variant. Bond orders are created from distances. Therefore, bonds break and form
+smoothly, and any parameter group can be refit by gradient descent.
 
 .. code-block:: python
 
@@ -453,169 +424,133 @@ Returns ``charges`` and the per-term energies.
    model = ReaxFF("CHO_cho_2008", trainable=("Desi", "ang_val1"))
    to_forcefield(model.export_library()).write("refit.frc")
 
-The parameters are a shipped ``.frc`` field by name, a ``.frc`` path or a
-ReaxFF-nn JSON library (:ref:`howto-forcefield-files`).
-
-``conventions`` picks how the terms are evaluated. ``"lammps"``, the default
-for classical fields, reproduces LAMMPS ``pair_style reaxff`` with
-``fix qeq/reaxff``, so a field refit here runs unchanged in LAMMPS.
-``"reaxff-nn"``, the default for ReaxFF-nn libraries, follows the behavior
-those libraries were trained with.
+The parameters come from a shipped ``.frc`` field by name, a ``.frc`` path or a
+ReaxFF-nn JSON library (see :ref:`howto-forcefield-files`). For classical
+fields, the default ``conventions: lammps`` reproduces LAMMPS ``pair_style
+reaxff``. Sp, a field refit in xnn runs unchanged in LAMMPS.
 
 OPLS / L-OPLS
 =============
-:class:`~xnn.ffnn.models.opls.OPLS`: the fixed-topology force field of
-Jorgensen *et al.* (1996), matching OpenMM. ``from_atoms`` perceives the
-bonds with RDKit and assigns the atom types from the SMARTS templates of the
-parameter file, so no type names are needed. Any parameter group is
-trainable, and several molecules can share one force field.
+:class:`~xnn.ffnn.models.opls.OPLS` is the fixed-topology force field of
+`Jorgensen et al. <https://doi.org/10.1021/ja9621760>`_, matching OpenMM.
+``from_atoms`` assigns the atom types from the SMARTS templates of the
+parameter file, so no type names are needed.
 
 .. code-block:: python
 
    from xnn.ffnn.models import OPLS
 
-   model = OPLS.from_atoms(atoms, "oplsaa", cutoff=10.0)   # or "lopls", "oplsaa-1996", "CL&P"
+   model = OPLS.from_atoms(atoms, "oplsaa", cutoff=10.0)    # Or "lopls", "oplsaa-1996", "CL&P"
    model = OPLS.from_atoms(atoms, "oplsaa", trainable=("dihedral_v",))
 
-Also ``switch_width``, ``fudge_lj`` / ``fudge_qq``.
+Other options such as ``switch_width`` and ``fudge_lj`` / ``fudge_qq`` can also
+be set.
 
 DREIDING / DREIDING-X6
 ======================
-:class:`~xnn.ffnn.models.dreiding.Dreiding`: the rule-generated generic
-force field of Mayo *et al.* (1990), matching the LAMMPS DREIDING styles.
-Bond, angle and torsion parameters are generated from per-atom generators,
-so it covers element combinations nobody tabulated; the generators are what
-is trainable. ``from_atoms`` perceives bonds and bond orders.
+:class:`~xnn.ffnn.models.dreiding.Dreiding` is the generic force field of
+`Mayo et al. <https://doi.org/10.1021/j100389a010>`_, matching the LAMMPS
+DREIDING styles. Its parameters are generated from per-atom rules, so it covers
+element combinations nobody tabulated, and those rules are what you train.
 
 .. code-block:: python
 
    from xnn.ffnn.models import Dreiding
 
    model = Dreiding.from_atoms(atoms, "dreiding", cutoff=10.0, charges="gasteiger")
-   model = Dreiding.from_atoms(atoms, "dreiding/X6")      # exponential-6 van der Waals
+   model = Dreiding.from_atoms(atoms, "dreiding/X6")      # Exponential-6 van der Waals
 
-Also ``bond_style`` (harmonic / morse), ``angle_style``, ``hbond``,
-``switch_width``. Set resonance types such as an amide ``C_R``-``N_R``
-explicitly; automatic perception does not.
+Other options, including ``bond_style`` (harmonic / morse), ``angle_style`` and
+``hbond``, are also available. Set resonance types, such as an amide
+``C_R``-``N_R``, explicitly.
 
 Semiempirical methods: PM3, PM6, PM6-ORG, PM7
 =============================================
-:class:`~xnn.sqmnn.models.PM6` and its siblings (``sqmnn`` family) are the
-NDDO semiempirical Hartree-Fock methods of Stewart: a minimal ``spd``
-valence basis, multipole two-center integrals, a self-consistent field per
-molecule and the method's core-core repulsion and corrections (PM7 dispersion
-and hydrogen bonds, PM6-ORG D3H4). ``energy`` is the heat of formation in eV;
-the outputs also hold ``heat_of_formation`` (kcal/mol), ``charges`` and
-``dipole``. With the published parameters (the default) the methods
-reproduce MOPAC; ``trainable`` makes parameter groups refittable, with
-exact gradients through the SCF.
+:class:`~xnn.sqmnn.models.PM6` and its siblings are the NDDO semiempirical
+methods of `Stewart <https://doi.org/10.1007/s00894-007-0233-4>`_, matching
+MOPAC. With the published parameters (the default) they reproduce MOPAC, and
+``trainable`` makes parameter groups refittable with exact gradients through
+the self-consistent field.
 
 .. code-block:: python
 
    from xnn.sqmnn.models import PM6, PM7
 
-   model = PM7()                                     # published parameters
-   model = PM6(trainable=["BETAS", "BETAP", "ALPB"])  # refit by gradient descent
-   model.parameter_set()                             # write_parameters() -> MOPAC EXTERNAL file
+   model = PM7()                                      # Published parameters
+   model = PM6(trainable=["BETAS", "BETAP", "ALPB"])  # Refit by gradient descent
 
-Also ``parameters`` (a set name or a MOPAC ``EXTERNAL`` file), ``corrections``,
-``unrestricted``, ``tol_density``. Molecules only (no periodic cells); open
-shells are spin-unrestricted. The published values are not shipped with xnn:
-the first use of a method downloads them from the MOPAC 23.2.5 sources into
-the model cache.
+``energy`` is the heat of formation in eV and the outputs also include
+``heat_of_formation`` (kcal/mol), ``charges`` and ``dipole``. The methods handle
+molecules only. The published parameters are downloaded from the MOPAC sources
+on first use.
 
 Add-ons for any model
 =====================
-Wrappers that add physics to any model above, enabled from the ``model``
-section or by wrapping a model object. They combine freely and every deploy
-channel carries them.
+These wrappers add additional physical terms or corrections to any model
+mentioned above. You can enable them in the ``model`` section of a config file.
+They can combine freely with other models and every deployment channel which can
+carry them.
 
 Long-range electrostatics (LES)
 -------------------------------
-:class:`~xnn.common.models.les.LatentEwald` (Cheng 2025): a small MLP maps
-each atom's features to latent charges and an Ewald sum over them adds the
-long-range energy.
+:class:`~xnn.common.models.les.LatentEwald` implements the latent Ewald
+summation of `Cheng <https://doi.org/10.1038/s41524-025-01577-7>`_. A small
+network maps each atom's features to latent charges, and an Ewald sum over them
+adds the long-range energy.
 
 .. code-block:: yaml
 
    model:
-     name: mace                  # any model
+     name: mace                  # Any model without charges of its own
      long_range: {n_channels: 4, sigma: 1.0, dl: 2.0}
-     # long_range: {n_channels: 4, constrain_charge: true}   # charges sum to total_charge
-     # long_range: {n_channels: 4, charge_solve: true}       # global charge equilibration
-     # long_range: {n_channels: 4, method: pme}              # particle-mesh sum for large cells
-     # long_range: {n_channels: 1, constrain_charge: true, dipole_origin: com}  # fit to dipoles
-     # long_range: {n_channels: 1, charge_solve: true, dielectric: 78.4}       # screened by a solvent
+     # long_range: {n_channels: 4, constrain_charge: true}   # Charges sum to the net charge
+     # long_range: {n_channels: 4, charge_solve: true}       # Global charge equilibration
+     # long_range: {n_channels: 4, method: pme}              # Particle-mesh sum for large cells
+     # long_range: {n_channels: 1, constrain_charge: true, dipole_origin: com}  # Fit to dipoles
+     # long_range: {n_channels: 1, charge_solve: true, dielectric: 78.4}       # Screened by a solvent
 
-Molecules use the exact real-space sum (``dl`` then has no effect).
-Outputs gain ``energy_sr``, ``energy_lr``, ``latent_charges``, plus
-``les_charges`` (the charge channel in e) and ``les_dipole`` (its dipole in
-e Angstrom about ``dipole_origin``: ``com``, ``centroid`` or ``origin``; zero
-for cells). ``les_charge_weight`` and ``les_dipole_weight`` in ``optim`` fit
-them to ``charges`` and ``dipole`` labels, which sets the scale of the latent
-charges where energies and forces alone leave it loose; the keys stay apart
-from the ``charges`` / ``dipole`` of models with charges of their own. For
-periodic cells ``method: pme`` evaluates the same sum on a particle mesh
-(smooth PME), whose cost grows as ``N log N`` instead of with the atoms times
-the wave vectors; it is accurate to the spline aliasing error, about 1e-6
-relative in the forces at the defaults ``pme_order`` 8 and ``pme_oversample``
-2. LES is the long-range
-electrostatics for models without charges of their own; the charge-predicting
-models (AIMNet2, PhysNet, SpookyNet, BAMBOO, HDNNP 3G/4G) keep their own
-``coulomb`` or ``electrostatics`` options, and LES is refused on them.
+The outputs gain ``energy_lr``, ``latent_charges``, ``les_charges`` (in e) and
+``les_dipole``. The main options:
 
-Two options tie the charges to the structure's ``total_charge`` (its
-``charge`` label; missing means neutral). ``constrain_charge`` shifts each
-structure's charges so one channel sums to the net charge and the others to
-zero (``charge_weights: learned`` lets the model choose where the shift
-goes). ``charge_solve`` goes further: that channel's head output becomes an
-electronegativity, a learned hardness per element (``hardness: features``
-for a per-atom one) is added, and the charges minimise
-``chi.q + 1/2 J q^2 + E_lr`` under the same constraint, so every charge
-responds to every other one through the Ewald kernel; the energy gains
-``energy_charge``. Charged structures must be molecules (a cell's ``k = 0``
-term is dropped). With ``fragments: true`` each molecule or ion is
-constrained on its own (plain charge equilibration lets charge flow between
-distant fragments): fragments are the covalently bonded groups, ions in
-``ion_charges`` (alkali, alkaline-earth and halide ions by default) always
-stand alone, and a fragment's charge comes from the per-atom
-``fragment_charges`` label of the structure file when present, else from
-that table.
+- ``constrain_charge`` makes one charge channel sum to the structure's net
+  charge.
+- ``charge_solve`` equilibrates the charges over the whole structure, and
+  ``fragments: true`` keeps each molecule or ion at its own charge.
+- ``les_charge_weight`` and ``les_dipole_weight`` in ``optim`` fit the charges
+  to ``charges`` and ``dipole`` labels, which sets their scale.
+- ``dielectric`` screens the long-range energy by a solvent's dielectric
+  constant, and ``learn_dielectric: true`` fits it.
 
-``dielectric`` divides the charge channel's long-range energy (and its
-Coulomb coupling in the charge solve) by a constant, 1 by default; set the
-solvent's value (78.4 for water) when the labels come from a continuum
-solvent model, so charges fitted to physical ones carry the screened
-interaction the labels contain. ``learn_dielectric: true`` fits it, through
-its logarithm, from ``dielectric`` as the start. The reported charges and
-dipole are unscreened.
+Molecules use the exact real-space sum. Models that predict their own charges
+(AIMNet2, PhysNet, SpookyNet, BAMBOO, HDNNP 3G/4G) use their own electrostatics
+instead.
 
 Dispersion (DFT-D4, DFT-D3)
 ---------------------------
 :class:`~xnn.common.models.d4.D4Dispersion` and
-:class:`~xnn.common.models.d3.D3Dispersion` reproduce ``dftd4`` and
-``simple-dftd3`` to floating-point precision; they also stand alone as the
-models ``d4`` and ``d3``.
+:class:`~xnn.common.models.d3.D3Dispersion` add the D4 (`Caldeweyher et al.
+<https://doi.org/10.1063/1.5090222>`_) and D3 (`Grimme et al.
+<https://doi.org/10.1063/1.3382344>`_) dispersion corrections, matching
+``dftd4`` and ``simple-dftd3``. Both also work as standalone models (``d4`` and
+``d3``).
 
 .. code-block:: yaml
 
    model:
      name: mace
-     dispersion: true                                    # PBE0-D4 defaults
-     # dispersion: {s6: 1.0, s8: 1.2, a1: 0.4, a2: 5.0}   # D4, explicit damping
+     dispersion: true                                     # PBE0-D4 defaults
+     # dispersion: {s6: 1.0, s8: 1.2, a1: 0.4, a2: 5.0}   # D4 with explicit damping
      # dispersion: {name: d3, damping: bj, s9: 1.0}       # D3(BJ) with the three-body term
 
-For condensed-phase work shorten the cutoffs (the defaults reproduce the
-reference codes) and add switching windows so MD stays smooth:
+For condensed phases, shorten the cutoffs and add switching windows so the MD
+run can stay smooth:
 
 .. code-block:: yaml
 
    dispersion: {cutoff_pair: 12.0, switch_width_pair: 2.0,
                 cutoff_triple: 10.0, switch_width_triple: 1.0,
-                tail_correction: true}                  # D4: add back the cut pair tail
+                tail_correction: true}                    # D4: add back the cut pair tail
 
-The net charge comes from ``total_charge``. D4 picks its charge solver by
-size (``regime: dense | large | auto``); in MD, ``eeq_reuse`` carries the
-solve between steps (:ref:`deployment`). Outputs gain ``energy_disp`` and,
-for D4, ``eeq_charges``. A model trained on labels with the dispersion
-removed records it in ``subtracted_dispersion`` (:ref:`deployment`).
+The net charge comes from the structure. A model trained on labels with the
+dispersion removed records it in ``subtracted_dispersion`` (see
+:ref:`deployment`).
