@@ -130,7 +130,7 @@ issues.
 The data hub
 ============
 Some of the popular standard benchmark datasets can be downloaded, converted to
-xnn-native formats and cached in one call:
+xnn-native formats and cached in one function call:
 
 .. code-block:: python
 
@@ -146,47 +146,76 @@ xnn-native formats and cached in one call:
    # Load the training split as an AtomicDataset with a 5 Å cutoff
    train = load_dataset("rmd17", molecule="aspirin", split="train", cutoff=5.0)
 
+Currently, the following datasets are available:
+
 - ``rmd17``: revised MD17, ten molecules with PBE energies and forces.
-  Options ``molecule``, ``fold`` (1 to 5), ``split``, ``units`` (``eV`` or
-  ``kcal/mol``), ``n_train`` / ``n_test``.
+
+  - Available arguments: ``molecule``, ``fold`` (1 to 5), ``split``, ``units``
+    (``eV`` or ``kcal/mol``), ``n_train`` / ``n_test``.
+
 - ``qm7``: the 7165 QM7 molecules with PBE0 atomization energies and the
-  stratified five-fold split (needs scipy).
+  stratified five-fold split (needs the scipy installed).
+
 - ``ethanol_response``: 10,000 ethanol conformations at PBE0/def2-TZVP with
-  energies, forces, dipole moments and polarizability tensors, the data of
-  the PaiNN spectra (needs ase). Options ``n_train`` / ``n_val`` / ``n_test``
-  (8000 / 1000 / 1000), ``seed``, ``units``, ``shielding``.
+  energies, forces, dipole moments and polarizability tensors. This is the data
+  of the PaiNN spectra (needs ase installed).
+  
+  - Available arguments: ``n_train`` / ``n_val`` / ``n_test`` (8000 / 1000 / 1000), ``seed``,
+    ``units``, ``shielding``.
+
 - ``ani1``: the ANI-1 set, 20 M conformations of H/C/N/O molecules in one
-  4.8 GB archive. Options ``heavy_atoms`` (1 to 8), ``max_molecules``,
-  ``max_conformations``, ``split``, ``units``.
+  4.8 GB archive.
+
+  - Available arguments: ``heavy_atoms`` (1 to 8), ``max_molecules``, ``max_conformations``,
+    ``split``, ``units``.
+
 - ``ani1x``: the ANI-1x set, 5 M conformations with energies and forces
-  (5.6 GB). Options ``level`` (``wb97x_dz``, ``wb97x_tz``, ``ccsd(t)_cbs``),
-  ``forces``, and the caps and splits of ``ani1``.
+  (5.6 GB). 
+  
+  - Available arguments: ``level`` (``wb97x_dz``, ``wb97x_tz``, ``ccsd(t)_cbs``),
+    ``forces``, and the caps and splits of ``ani1``.
+
 - ``ani1ccx``: the coupled-cluster subset of ANI-1x (energies only), from
   the same file.
 - ``ani2x``: the seven-element ANI-2x set (H/C/N/O/S/F/Cl) with energies
-  and forces (3.7 GB). Options ``n_atoms``, ``forces``, ``max_groups``,
-  ``max_conformations``, ``split``, ``units``.
+  and forces (3.7 GB). 
+  
+  - Available arguments: ``n_atoms``, ``forces``, ``max_groups``, ``max_conformations``,
+    ``split``, ``units``.
+
 - ``hdnnp4g``: the four charge-transfer benchmarks of the 4G-HDNNP paper
   with energies, forces and Hirshfeld charges, as one ``all`` split (needs
-  ase). Option ``system``: ``carbon_chain``, ``ag_clusters``,
-  ``nacl_clusters``, ``au2_mgo`` (periodic) or ``au2_mgo_minima`` (its four
-  DFT-optimized structures). The molecular sets and the minima are CC BY-NC 4.0.
+  ase).
+  
+  - Available arguments: ``system``: ``carbon_chain``, ``ag_clusters``,
+    ``nacl_clusters``, ``au2_mgo`` (periodic) or ``au2_mgo_minima`` (its four
+    DFT-optimized structures). The molecular sets and the minima are CC BY-NC
+    4.0.
+
 - ``spookynet_states``: the electronic-state sets of the SpookyNet paper,
   2200 Ag3+ / Ag3- clusters or singlet / triplet CH2 molecules at GFN2-xTB
   with total charges, spin multiplicities, energies, forces and dipoles.
-  Options ``system`` (``ag3`` or ``carbene``), ``n_train`` / ``n_val``
-  (1000 / 100, the rest is ``test``), ``seed``.
+  
+  - Available arguments: ``system`` (``ag3`` or ``carbene``), ``n_train`` /
+    ``n_val`` (1000 / 100, the rest is ``test``), ``seed``.
+
 - ``argon_md``: periodic argon with energies, forces and stress, bundled
-  with the repository; used by the argon example notebooks.
+  with the repository. This dataset is used by several example notebooks.
 - ``lode_dimers``: the LODE non-bonded sets (biomolecular dimers, monomers,
-  point charges, xenon). Options ``subset``, ``label``, ``return_info``; the
-  bundled ``bio_scan`` subset loads offline.
+  point charges, xenon).
+
+  - Available arguments: ``subset``, ``label``, ``return_info``. The bundled
+    ``bio_scan`` subset loads offline.
+
 - ``s22`` / ``s66``: the S22 and S66 noncovalent dimers at their reference
   geometries with per-atom ``fragment`` labels and CCSD(T)/CBS
-  ``interaction_energy`` (kcal/mol). Option ``reference`` (``original`` or,
-  for S22, ``revised``).
+  ``interaction_energy`` (kcal/mol).
+  
+  - Available arguments: ``reference`` (``original`` or, for S22, ``revised``).
 
-Files are cached and MD5-verified under ``datasets/<name>/`` (``cache_dir``,
-``XNN_DATASETS`` or ``XNN_CACHE`` change that). The ANI sets need the ``hub``
-extra. :ref:`howto-load-datasets` has examples per dataset;
-:ref:`developer-guide-extending` shows how to register a new one.
+Files are cached and MD5-verified under ``datasets/<name>/``. The directory can
+also be set by ``cache_dir`` argument or by setting the environment variables
+``XNN_DATASETS`` or ``XNN_CACHE``. The ANI sets need the ``hub`` extra
+dependency installed. The :ref:`howto-load-datasets` has examples per dataset
+and the :ref:`developer-guide-extending` guide shows how to register a new
+dataset in the data hub.
