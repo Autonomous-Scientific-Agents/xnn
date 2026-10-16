@@ -11,6 +11,13 @@ be loaded through the same function call and the same cache. The
 ``examples/models/pretrained_models_tutorial.ipynb`` notebook provides a
 runnable version of this page.
 
+.. note::
+
+   **xnn does not ship any pre-trained models or third-party weights.**
+   Published models are downloaded from their developers' own release
+   locations when you first ask for one, and they stay under their original
+   licenses.
+
 Inspect the model registry
 ==========================
 
