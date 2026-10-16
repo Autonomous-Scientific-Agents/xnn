@@ -10,6 +10,14 @@ original models when accessible (``tests/``, ``examples/fidelity_checks/``). The
 reference packages are used only as external oracles and references for
 validating our implementation.
 
+.. note::
+
+   **xnn does not ship any pre-trained models or third-party weights.**
+   Published models are downloaded from their developers' own release
+   locations when you first ask for one, and they stay under their original
+   licenses.
+
+
 Numerical agreement under identical weights involves:
 
 - **MACE** (`ACEsuit/mace <https://github.com/ACEsuit/mace>`_): about 1e-16,
