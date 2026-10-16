@@ -22,44 +22,48 @@ Numerical agreement under identical weights involves:
 
 - **MACE** (`ACEsuit/mace <https://github.com/ACEsuit/mace>`_): about 1e-16,
   including ScaleShift, the Agnesi and Soft distance transforms and the
-  density-normalized blocks. 16 of the 17 released MACE-MP / MACE-OFF
-  checkpoints and every head of ``mace-mh-0`` convert with energy parity
-  about 1e-15 eV/atom; ``mace-mh-1`` is rejected with an explicit error.
-- **NequIP** (`mir-group/nequip <https://github.com/mir-group/nequip>`_):
-  about 1e-16 in energies, forces and stress; parameter names match, so
-  state dicts transplant directly.
+  density-normalized blocks. 16 of the 17 released MACE-MP, MACE-OFF checkpoints
+  and every head of ``mace-mh-0`` convert with energy parity of about 1e-15
+  eV/atom. The ``mace-mh-1`` model is not currently supported and will be
+  rejected with an explicit error if requested by a ``from_pretrained()`` call.
+- **NequIP** (`mir-group/nequip <https://github.com/mir-group/nequip>`_): about
+  1e-16 in energies, forces and stress. The parameter names match between xnn
+  and the original code. Therefore, the state dicts can be transplanted
+  directly.
 - **Allegro** (`mir-group/allegro <https://github.com/mir-group/allegro>`_
   v0.3.0): about 1e-15, with the upstream weight layout.
 - **CACE** (`BingqingCheng/cace <https://github.com/BingqingCheng/cace>`_):
   about 1e-16, molecular and periodic, for every message-passing mechanism.
 - **AIMNet2** (`isayevlab/aimnetcentral
-  <https://github.com/isayevlab/aimnetcentral>`_): float32 round-off for all
-  six published families, including the DSF, Ewald and PME lattice sums.
-  Served with the two-body D3(BJ) term of the reference calculator.
+  <https://github.com/isayevlab/aimnetcentral>`_): float32 round-off for all six
+  published families, including the DSF, Ewald and PME lattice sums. The
+  implementation is served with the two-body D3(BJ) term of the reference
+  calculator.
 - **PhysNet** (`MMunibas/PhysNet <https://github.com/MMunibas/PhysNet>`_,
   TensorFlow): about 1e-15 in energies, forces and charges from a
-  pure-PyTorch translation. Dropout is not implemented.
+  pure-PyTorch translation. The dropout layer is not implemented.
 - **ANI** (`aiqm/torchani <https://github.com/aiqm/torchani>`_): the AEV to
-  about 1e-16; the pretrained ANI-1x, ANI-1ccx and ANI-2x ensembles to about
-  1e-8 Ha.
-- **HDNNP** (`RuNNer <https://gitlab.com/runner-suite/runner2>`_ 2.0.5,
-  compiled and run as an external program): RuNNer model directories load
-  unchanged; energies, forces and charges agree to about 1e-16 relative for
-  molecules in every generation (2G, 3G with point or Gaussian charges and
-  screening, 4G with element or network hardnesses and charged structures)
-  and to the Ewald truncation (about 1e-12) in periodic cells, also for the
-  published 4G Au2/MgO model. 1G follows the review's definition.
+  about 1e-16. The pretrained ANI-1x, ANI-1ccx and ANI-2x ensembles are
+  reproduced to about 1e-8 Ha in energies.
+- **HDNNP** (`RuNNer <https://gitlab.com/runner-suite/runner2>`_ 2.0.5, compiled
+  and run as an external program): RuNNer model directories load unchanged.
+  Energies, forces and charges agree to about 1e-16 relative for molecules in
+  every generation (2G, 3G with point or Gaussian charges and screening, 4G with
+  element or network hardnesses and charged structures) and to the Ewald
+  truncation (about 1e-12) in periodic cells as well as for the published 4G
+  Au2/MgO model. Our implementation of 1G follows the `review's
+  <https://doi.org/10.1021/acs.chemrev.0c00868>`_ definition.
 - **SchNet** (Schütt *et al.* 2017): a clean-room build, verified against an
   independent implementation of the paper's equations to about 1e-15. No
-  schnetpack code is used or compared against.
+  schnetpack code is used or compared against as an oracle.
 - **DimeNet and DimeNet++** (`gasteigerjo/dimenet
-  <https://github.com/gasteigerjo/dimenet>`_, TensorFlow): about 1e-13
-  relative in energies and forces under transplanted weights in float64;
-  the published DimeNet++ QM9 model reproduces to float32 round-off.
+  <https://github.com/gasteigerjo/dimenet>`_, TensorFlow): about 1e-13 relative
+  in energies and forces under transplanted weights in float64. The published
+  DimeNet++ QM9 model is reproduced up to float32 round-off.
 - **GemNet** (`TUM-DAML/gemnet_pytorch
   <https://github.com/TUM-DAML/gemnet_pytorch>`_): about 1e-13 relative in
-  energies and forces under transplanted weights in float64, for GemNet-Q,
-  -T, -dQ and -dT; the published GemNet-Q and GemNet-T weights reproduce to
+  energies and forces under transplanted weights in float64, for GemNet-Q, -T,
+  -dQ and -dT. The published GemNet-Q and GemNet-T weights are reproduced to
   float32 round-off.
 - **PaiNN** (Schütt *et al.* 2021; reference implementation in
   `schnetpack <https://github.com/atomistic-machine-learning/schnetpack>`_):
@@ -67,20 +71,20 @@ Numerical agreement under identical weights involves:
   of its equations and against ``schnetpack`` under transplanted weights:
   energies, forces, latent charges, dipoles and polarizabilities agree to
   float64 and float32 round-off.
-- **SpookyNet** (`OUnke/SpookyNet <https://github.com/OUnke/SpookyNet>`_):
-  a build from the paper, verified against an independent implementation of
-  its equations and against the reference code under transplanted weights:
-  energies, forces, charges and dipoles agree to float64 round-off (about
-  1e-14) for molecules in several charge and spin states, batches and
-  periodic cells, and the published example model reproduces to 1e-15. The
-  D4 term uses the dftd4 data of :mod:`~xnn.common.models.d4`; the reference
-  code ships float32-rounded covalent radii, which moves its dispersion
-  energies by about 1e-8 relative.
-- **SE(3) steerable CNN** (Weiler *et al.* 2018): a clean-room build from
-  the paper; the steerable kernel basis is formed from Clebsch-Gordan
-  coefficients and checked against a numerical solution of the paper's
-  constraint. The energy is exactly invariant under the rotations of the
-  grid onto itself and invariant to the bandlimit under every other one.
+- **SpookyNet** (`OUnke/SpookyNet <https://github.com/OUnke/SpookyNet>`_): a
+  build from the paper, verified against an independent implementation of its
+  equations and against the reference code under transplanted weights: energies,
+  forces, charges and dipoles agree to float64 round-off (about 1e-14 in worst
+  case) for molecules in several charge and spin states, batches and periodic
+  cells, and the published example model reproduces to 1e-15. The D4 term uses
+  the ``dftd4`` data of :mod:`~xnn.common.models.d4`. The reference code ships
+  float32-rounded covalent radii, which moves its dispersion energies by about
+  1e-8 relative.
+- **SE(3) steerable CNN** (Weiler *et al.* 2018): a clean-room build from the
+  paper. The steerable kernel basis is formed from Clebsch-Gordan coefficients
+  and checked against a numerical solution of the paper's constraint. The energy
+  is exactly invariant under the rotations of the grid onto itself and invariant
+  to the bandlimit under every other one.
 - **Spherical CNN** (`jonas-koehler/s2cnn
   <https://github.com/jonas-koehler/s2cnn>`_): a clean-room build from the
   paper; the Wigner d-matrices, the :math:`S^2` / :math:`SO(3)` transforms,
@@ -92,22 +96,21 @@ Numerical agreement under identical weights involves:
   about 1e-15 layer by layer. xnn returns the conservative force, equal to
   upstream's ``forces + qeq_force``.
 - **LES** (``cace.modules.EwaldPotential``): ``LatentEwald(CACE)`` reproduces
-  CACE-LR to float32 round-off; each kernel to about 1e-16 in float64.
+  CACE-LR to float32 round-off and each kernel to about 1e-16 in float64.
 - **DFT-D4 and DFT-D3** (`dftd4 <https://github.com/dftd4/dftd4>`_,
-  `simple-dftd3 <https://github.com/dftd3/simple-dftd3>`_): energies to
-  about 1e-16 hartree, gradients and virials to about 1e-17, for every
-  damping function; the matrix-free D4 regime differs by the reference's
-  own Ewald tolerance (about 1e-8 in the charges).
-- **ReaxFF / ReaxFF-nn**: the published equations; with
+  `simple-dftd3 <https://github.com/dftd3/simple-dftd3>`_): energies to about
+  1e-16 hartree, gradients and virials to about 1e-17, for every damping
+  function. The matrix-free D4 regime differs by the reference's own Ewald
+  tolerance (about 1e-8 in the charges).
+- **ReaxFF / ReaxFF-nn**: based on the published equations with
   ``conventions="lammps"`` (the default for classical fields), LAMMPS
   ``pair_style reaxff`` with ``fix qeq/reaxff`` on water, NaCl(aq) and C/H/O
-  structures of up to 1536 atoms: energies to about 3e-10 eV per atom, forces
-  to about 1e-6 eV/Angstrom, charges to 1e-9 e. The vendored
+  structures of up to 1536 atoms. The energies match to about 3e-10 eV per atom,
+  forces to about 1e-6 eV/Angstrom, charges to 1e-9 e. The vendored
   ``CHO_cho_2008`` file rounds eight bond energies to three decimals, which
-  moves its energies by about 1e-5 eV per bond. The authors'
-  ReaxFF-nn code is AGPL-licensed, so nothing derived from it is distributed
-  and none of its code was copied; the shipped tests recompute every term
-  from the papers.
+  moves its energies by about 1e-5 eV per bond. The authors' ReaxFF-nn code is
+  AGPL-licensed. So, nothing derived from it is distributed and none of its
+  code was copied. The shipped tests recompute every term from the papers.
 - **OPLS / L-OPLS** (Jorgensen *et al.* 1996): OpenMM to about 1e-7 kJ/mol,
   and Table 1 of the paper to 0.01 kcal/mol with the ``"oplsaa-1996"``
   library.
@@ -121,7 +124,6 @@ Numerical agreement under identical weights involves:
   auxiliary series; its PM6-ORG gradient is not the derivative of its
   energy, xnn's is.
 
-Fidelity means published results can be reproduced, weights move in either
-direction (:ref:`howto-transplant`), and the implementations serve as
-readable references for the architectures; the fidelity notebooks double as
-annotated tours of each one.
+Fidelity in xnn has a specific meaning: it means published results can be
+reproduced, weights can move in either direction (:ref:`howto-transplant`), and
+the implementations serve as readable references for the architectures.
