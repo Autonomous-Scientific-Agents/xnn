@@ -145,7 +145,7 @@ Models at a glance
      - SE(3) steerable CNN, 3D CNN, spherical CNN
    * - Classical force fields (``ffnn``)
      - ReaxFF / ReaxFF-nn, OPLS-AA / L-OPLS, DREIDING / X6
-   * - Semiempirical quantum chemistry (``sqmnn``)
+   * - Semi-empirical quantum mechanics (``sqmnn``)
      - PM3, PM6, PM6-ORG, PM7
    * - Hybrid neural networks (``hybrid``)
      - BAMBOO, SpookyNet
