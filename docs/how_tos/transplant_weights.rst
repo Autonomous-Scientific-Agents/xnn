@@ -58,7 +58,7 @@ xnn also reads checkpoints that you obtained yourself:
   torchani's weights into them as described below.
 
 Transplanting weights manually
-=============================
+==============================
 For any other upstream model:
 
 1. Build the xnn model with the upstream hyperparameters (cutoff, angular
