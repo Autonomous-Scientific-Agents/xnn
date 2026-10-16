@@ -8,9 +8,9 @@ Each model reproduces its reference code and its paper results when available,
 and the code is verified block by block with transplanted weights from the
 original models when accessible (``tests/``, ``examples/fidelity_checks/``). The
 reference packages are used only as external oracles and references for
-validating our implementation; at run time NequIP, MACE and Allegro need
-``e3nn`` and every other model is plain PyTorch. Numerical agreement under
-identical weights involves:
+validating our implementation.
+
+Numerical agreement under identical weights involves:
 
 - **MACE** (`ACEsuit/mace <https://github.com/ACEsuit/mace>`_): about 1e-16,
   including ScaleShift, the Agnesi and Soft distance transforms and the
