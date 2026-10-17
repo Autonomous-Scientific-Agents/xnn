@@ -54,11 +54,15 @@ def _min_image(vec, cell):
     numpy.ndarray
         Minimum-image displacement vectors.
     """
-    import numpy as np
+    import torch
+
+    from .geometry import minimum_image_vectors
+
     if cell is None:
         return vec
-    frac = vec @ np.linalg.inv(cell)
-    return (frac - np.round(frac)) @ cell
+    vectors = torch.as_tensor(vec)
+    lattice = torch.as_tensor(cell, dtype=vectors.dtype)
+    return minimum_image_vectors(vectors.reshape(-1, 3), lattice).numpy().reshape(vec.shape)
 
 
 def guess_bonds(positions, atomic_numbers, cell=None, scale: float = 1.2
